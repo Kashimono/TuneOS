@@ -1,10 +1,11 @@
 {
   "name": "tuneos",
-  "version": "1.0.0",
-  "description": "A Web Based OS Design",
-  "main": "index.js",
+  "version": "0.1.0",
+  "description": "A music-centric web desktop experience",
+  "main": "Backend/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node Backend/server.js",
+    "dev": "node --watch Backend/server.js"
   },
   "repository": {
     "type": "git",
