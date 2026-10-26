@@ -1,0 +1,24 @@
+{
+  "name": "tuneos",
+  "version": "1.0.0",
+  "description": "A Web Based OS Design",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kashimono/TuneOS.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Kashimono/TuneOS/issues"
+  },
+  "homepage": "https://github.com/Kashimono/TuneOS#readme",
+  "dependencies": {
+    "express": "^5.3.0"
+  }
+}
