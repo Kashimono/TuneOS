@@ -15,6 +15,7 @@
   const playerWindow = document.getElementById('playerWindow');
   const settingsWindow = document.getElementById('settingsWindow');
   const windows = { player: playerWindow, settings: settingsWindow };
+  const windowOpened = { player: false, settings: false };
   let preferences = readPreferences();
   let tracks = [];
   let currentIndex = -1;
@@ -91,12 +92,14 @@
   function focusWindow(appName) {
     const windowElement = windows[appName];
     if (!windowElement) return;
+    windowOpened[appName] = true;
     windowElement.hidden = false;
     windowElement.style.zIndex = String(++highestZ);
     windowElement.classList.add('is-active');
     Object.values(windows).forEach((item) => { if (item !== windowElement) item.classList.remove('is-active'); });
     const taskbarButton = document.querySelector(`.taskbar-app[data-open-window="${appName}"]`);
     taskbarButton?.classList.add('is-open');
+    taskbarButton?.classList.remove('is-minimized');
     renderOpenApps();
   }
 
@@ -105,7 +108,9 @@
     if (!item) return;
     item.hidden = true;
     item.classList.remove('is-active');
-    document.querySelector(`.taskbar-app[data-open-window="${appName}"]`)?.classList.remove('is-open');
+    const taskbarButton = document.querySelector(`.taskbar-app[data-open-window="${appName}"]`);
+    taskbarButton?.classList.remove('is-open');
+    taskbarButton?.classList.add('is-minimized');
     renderOpenApps();
   }
 
@@ -114,7 +119,9 @@
     if (!item) return;
     item.hidden = true;
     item.classList.remove('is-active', 'is-maximized');
-    document.querySelector(`.taskbar-app[data-open-window="${appName}"]`)?.classList.remove('is-open');
+    windowOpened[appName] = false;
+    const taskbarButton = document.querySelector(`.taskbar-app[data-open-window="${appName}"]`);
+    taskbarButton?.classList.remove('is-open', 'is-minimized');
     renderOpenApps();
   }
 
@@ -122,24 +129,28 @@
     const container = document.getElementById('taskbarOpenApps');
     container.replaceChildren();
     Object.entries(windows).forEach(([appName, item]) => {
-      if (item.hidden) return;
+      if (!windowOpened[appName]) return;
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = appName === 'player' ? '♫ Music' : '◌ Settings';
-      button.addEventListener('click', () => minimizeWindow(appName));
+      button.setAttribute('aria-label', `${item.hidden ? 'Restore' : 'Minimize'} ${appName === 'player' ? 'music player' : 'settings'}`);
+      button.classList.toggle('is-minimized', item.hidden);
+      button.addEventListener('click', () => toggleTaskbarWindow(appName));
       container.append(button);
     });
   }
 
-  document.querySelectorAll('[data-open-window]').forEach((button) => {
+  function toggleTaskbarWindow(appName) {
+    const item = windows[appName];
+    if (item && !item.hidden && item.classList.contains('is-active')) minimizeWindow(appName);
+    else focusWindow(appName);
+  }
+
+  document.querySelectorAll('[data-open-window]:not(.taskbar-app)').forEach((button) => {
     button.addEventListener('click', () => focusWindow(button.dataset.openWindow));
   });
   document.querySelectorAll('.taskbar-app').forEach((button) => {
-    button.addEventListener('click', () => {
-      const item = windows[button.dataset.openWindow];
-      if (item && !item.hidden && item.classList.contains('is-active')) minimizeWindow(button.dataset.openWindow);
-      else focusWindow(button.dataset.openWindow);
-    });
+    button.addEventListener('click', () => toggleTaskbarWindow(button.dataset.openWindow));
   });
   document.querySelectorAll('.app-window').forEach((item) => {
     item.addEventListener('pointerdown', () => {
