@@ -499,6 +499,38 @@
     if (audioContext && audioContext.state !== 'closed') audioContext.close();
   });
 
+  const signinForm = document.getElementById('signinForm');
+  const signinMessage = document.getElementById('signinMessage');
+  const signinPassword = document.getElementById('signinPassword');
+
+  signinForm.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!signinForm.reportValidity()) return;
+    signinMessage.textContent = 'Sign-in is not connected yet. Use the local demo to explore TuneOS.';
+    signinMessage.classList.add('is-visible');
+  });
+
+  signinForm.addEventListener('input', () => {
+    signinMessage.textContent = '';
+    signinMessage.classList.remove('is-visible');
+  });
+
+  document.getElementById('passwordToggle').addEventListener('click', (event) => {
+    const button = event.currentTarget;
+    const showPassword = signinPassword.type === 'password';
+    signinPassword.type = showPassword ? 'text' : 'password';
+    button.textContent = showPassword ? 'Hide' : 'Show';
+    button.setAttribute('aria-label', `${showPassword ? 'Hide' : 'Show'} password`);
+    button.setAttribute('aria-pressed', String(showPassword));
+  });
+
+  document.getElementById('demoAccess').addEventListener('click', () => {
+    document.getElementById('signinScreen').hidden = true;
+    desktop.hidden = false;
+    document.title = 'TuneOS — your music desktop';
+    window.dispatchEvent(new Event('resize'));
+  });
+
   applyPreferences();
   updateClocks();
   window.setInterval(updateClocks, 1000);

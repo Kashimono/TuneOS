@@ -21,6 +21,7 @@ Open [http://localhost:3000](http://localhost:3000). For automatic server restar
 
 ## Using TuneOS
 
+- The sign-in screen is a frontend prototype. Use **Explore the local demo** to open the desktop; no account is created and sign-in details are not sent or stored.
 - Open **Music** from the desktop icon or taskbar and add one or more audio files from your device.
 - Use the playlist, playback controls, seek bar, and volume slider. Files are played in the browser and are never uploaded to the server.
 - The visualizer and Aurora wallpaper analyze the playing audio through the Web Audio API. Start playback with a user action so the browser can enable audio processing.
@@ -33,6 +34,7 @@ The Express server in `Backend/server.js` serves the frontend from `Frontend/` a
 
 - TuneOS is a web page that simulates a desktop; it does not replace the Windows desktop or set a native Windows wallpaper.
 - Spotify and external music players are not supported in v0.1.
+- Account authentication and password recovery are not connected in this prototype.
 - Music files and playlists are not persisted after refresh. Select files again in each browser session.
 - Audio decoding depends on browser and file format support. Some browsers may not decode every format.
 - Preferences are local to the current browser profile and device.
