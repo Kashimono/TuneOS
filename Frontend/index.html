@@ -5,11 +5,65 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101014">
   <meta name="description" content="TuneOS is a music-centric web desktop for your local library.">
-  <title>TuneOS — your music desktop</title>
+  <title>TuneOS — sign in</title>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/signin.css">
 </head>
 <body data-theme="midnight" data-wallpaper="aurora" data-accent="violet">
-  <main class="desktop" id="desktop">
+  <main class="signin-screen" id="signinScreen">
+    <div class="signin-glow signin-glow-one" aria-hidden="true"></div>
+    <div class="signin-glow signin-glow-two" aria-hidden="true"></div>
+    <header class="signin-header">
+      <a class="brand signin-brand" href="#signin" aria-label="TuneOS sign in">
+        <span class="brand-mark"><i></i><i></i><i></i><i></i></span>
+        <span>Tune<span class="brand-light">OS</span></span>
+      </a>
+      <span class="signin-header-note"><span class="live-dot"></span> YOUR MUSIC DESKTOP</span>
+    </header>
+
+    <div class="signin-layout">
+      <section class="signin-intro" aria-label="About TuneOS">
+        <p class="eyebrow">A DESKTOP THAT FEELS LIKE YOURS</p>
+        <h1>Your space.<br><span>Your soundtrack.</span></h1>
+        <p class="signin-intro-copy">A calmer place to play your music, shape the mood, and make the moment your own.</p>
+        <div class="signin-art" aria-hidden="true">
+          <div class="signin-art-orbit orbit-back"></div>
+          <div class="signin-art-orbit orbit-front"></div>
+          <div class="signin-art-disc"><span>♫</span></div>
+          <div class="signin-art-glass"><span class="art-equalizer"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span>MAKE ROOM FOR SOUND</span></div>
+        </div>
+        <div class="signin-feature-row"><span><i>♫</i> Local music</span><span><i>◌</i> Your atmosphere</span><span><i>⌘</i> Your desktop</span></div>
+      </section>
+
+      <section class="signin-card-wrap" aria-labelledby="signinTitle">
+        <div class="signin-card">
+          <div class="signin-card-brand"><span class="brand-mark"><i></i><i></i><i></i><i></i></span><span class="eyebrow">WELCOME TO TUNEOS</span></div>
+          <h2 id="signinTitle">Sign in</h2>
+          <p class="signin-subtitle">Pick up where your music takes you.</p>
+
+          <form id="signinForm" class="signin-form" novalidate>
+            <label for="signinEmail">Email address</label>
+            <input id="signinEmail" name="email" type="email" autocomplete="username" placeholder="you@example.com" required>
+            <div class="password-label-row"><label for="signinPassword">Password</label></div>
+            <div class="password-input-wrap">
+              <input id="signinPassword" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" minlength="8" required>
+              <button class="password-toggle" id="passwordToggle" type="button" aria-label="Show password" aria-pressed="false">Show</button>
+            </div>
+            <p class="signin-message" id="signinMessage" role="status" aria-live="polite"></p>
+            <button class="signin-submit" type="submit">Sign in <span>↗</span></button>
+          </form>
+
+          <div class="signin-divider"><span></span><i>OR</i><span></span></div>
+          <button class="demo-access" id="demoAccess" type="button"><span class="demo-access-icon">♫</span><span><strong>Explore the local demo</strong><small>No account needed for this prototype</small></span><b>→</b></button>
+          <p class="signin-privacy">Your music stays on your device. TuneOS does not upload local audio files.</p>
+        </div>
+        <p class="signin-footnote">Authentication is not connected in this prototype. Sign-in details are not sent or stored.</p>
+      </section>
+    </div>
+    <footer class="signin-footer"><span>© 2026 TUNEOS</span><span>MADE FOR YOUR MOMENT <i>✦</i></span></footer>
+  </main>
+
+  <main class="desktop" id="desktop" hidden>
     <canvas class="wallpaper-canvas" id="wallpaperCanvas" aria-hidden="true"></canvas>
     <div class="wallpaper-wash" aria-hidden="true"></div>
 
