@@ -1,0 +1,6 @@
+node_modules/
+.env
+database/*.sqlite*
+storage/audio/*
+!storage/audio/.gitkeep
+npm-debug.log*

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080d19">
+  <meta name="description" content="TuneOS — a local DJ and audio production desktop workspace.">
+  <title>TuneOS — Audio workspace</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="desktop" class="desktop">
+    <header class="topbar">
+      <button class="brand" data-open="launcher" aria-label="Open app launcher"><span class="brand-mark">♫</span><span>TuneOS</span></button>
+      <div class="topbar-center"><span class="workspace-label">WORKSPACE</span><span id="topbar-app">Desktop</span></div>
+      <div class="topbar-status">
+        <span class="status-pill"><i class="status-dot"></i> Audio engine ready</span>
+        <button class="icon-button" data-open="notifications" aria-label="Notifications">◉</button>
+        <button class="status-button" data-open="quick-settings"><span>⌁</span> <span>◕</span> <span>▰</span></button>
+        <button class="clock-button" data-open="quick-settings"><strong id="clock">--:--</strong><small id="date">---</small></button>
+        <button class="avatar-button" data-open="settings" aria-label="Open profile and settings">M</button>
+      </div>
+    </header>
+
+    <nav class="shortcut-rail" aria-label="Desktop shortcuts">
+      <button class="shortcut active" data-app="dj" title="DJ Studio"><span class="shortcut-icon violet">♫</span><small>DJ Mixer</small></button>
+      <button class="shortcut" data-app="studio" title="Audio Studio"><span class="shortcut-icon cyan">▥</span><small>Audio<br>Studio</small></button>
+      <button class="shortcut" data-app="library" title="Music Library"><span class="shortcut-icon blue">▤</span><small>Music<br>Library</small></button>
+      <button class="shortcut" data-app="files" title="File Manager"><span class="shortcut-icon amber">▰</span><small>Files</small></button>
+      <div class="rail-divider"></div>
+      <button class="shortcut" data-app="settings" title="Settings"><span class="shortcut-icon slate">⚙</span><small>Settings</small></button>
+    </nav>
+
+    <main id="workspace" class="workspace" aria-label="TuneOS workspace">
+      <div class="desktop-welcome">
+        <div class="welcome-eyebrow"><span class="live-dot"></span> YOUR AUDIO DESKTOP</div>
+        <h1>Make room<br>for the <em>mix.</em></h1>
+        <p>Your studio is ready. Open an app to start creating.</p>
+        <button class="primary-button" data-app="dj">Open DJ Studio <span>↗</span></button>
+        <div class="welcome-footer"><span class="mini-wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span>LOCAL AUDIO WORKSPACE</span></div>
+      </div>
+      <div id="windows" class="windows" aria-live="polite"></div>
+    </main>
+
+    <footer id="dock" class="dock" aria-label="App dock">
+      <button class="dock-launcher" data-open="launcher" aria-label="All apps"><span>◈</span></button>
+      <span class="dock-separator"></span>
+      <button class="dock-app active" data-app="dj" title="DJ Studio"><span class="dock-glyph violet">♫</span></button>
+      <button class="dock-app" data-app="studio" title="Audio Studio"><span class="dock-glyph cyan">▥</span></button>
+      <button class="dock-app" data-app="library" title="Music Library"><span class="dock-glyph blue">▤</span></button>
+      <button class="dock-app" data-app="files" title="File Manager"><span class="dock-glyph amber">▰</span></button>
+      <button class="dock-app" data-app="monitor" title="System Monitor"><span class="dock-glyph green">◴</span></button>
+      <span class="dock-spacer"></span>
+      <button class="dock-app dock-settings" data-app="settings" title="Settings"><span class="dock-glyph slate">⚙</span></button>
+      <span class="dock-divider"></span>
+      <button class="dock-clock" data-open="quick-settings"><strong id="dock-clock">--:--</strong><small id="dock-date">---</small></button>
+    </footer>
+
+    <section id="launcher" class="overlay launcher" hidden aria-label="App launcher">
+      <div class="overlay-card launcher-card">
+        <div class="launcher-head"><div><span class="eyebrow">TUNEOS DESKTOP</span><h2>Your apps</h2></div><button class="icon-button" data-close-overlay aria-label="Close">×</button></div>
+        <label class="search-box"><span>⌕</span><input id="launcher-search" type="search" placeholder="Search apps and tracks…" autocomplete="off"><kbd>ESC</kbd></label>
+        <div id="launcher-results" class="app-grid"></div>
+        <div class="launcher-bottom"><span>13 APPS · LOCAL WORKSPACE</span><span>CTRL / ⌘ + K</span></div>
+      </div>
+    </section>
+
+    <section id="search" class="overlay search-overlay" hidden aria-label="Search">
+      <div class="overlay-card search-card"><label class="search-box"><span>⌕</span><input id="global-search" type="search" placeholder="Search TuneOS…" autocomplete="off"><kbd>ESC</kbd></label><div id="search-results" class="search-results"><p class="muted">Search apps, tracks, and projects.</p></div></div>
+    </section>
+    <section id="quick-settings" class="overlay popover" hidden><div class="overlay-card popover-card"><div class="popover-title"><div><span class="eyebrow">SYSTEM</span><h3>Quick settings</h3></div><button class="icon-button" data-close-overlay>×</button></div><div class="quick-row"><span>Audio engine</span><b class="good-label">● Ready</b></div><div class="quick-row"><span>Theme</span><button class="text-button" data-theme-toggle>Toggle theme</button></div><div class="quick-row"><span>Connection</span><b class="muted">Local</b></div><button class="secondary-button full" data-app="settings">Open Settings</button></div></section>
+    <section id="notifications" class="overlay popover notifications-popover" hidden><div class="overlay-card popover-card"><div class="popover-title"><div><span class="eyebrow">ACTIVITY</span><h3>Notifications</h3></div><button class="icon-button" data-close-overlay>×</button></div><div id="notification-list" class="notification-list"><p class="muted">You're all caught up.</p></div></div></section>
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+  </div>
+  <script src="/audio-engine.js"></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>

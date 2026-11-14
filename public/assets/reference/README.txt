@@ -1,0 +1,1 @@
+These images were included in the recovered Figma Make source bundle. They belong to an older BeatBox OS draft and are preserved only as source references; the current TuneOS desktop design is recreated in CSS and does not use them as screen backgrounds.
