@@ -90,14 +90,39 @@
       const media = this.media.get(deck);
       if (media) media.playbackRate = Math.max(0.5, Math.min(1.5, 1 + Number(pitch) / 100));
     }
+
     setCrossfade(value) {
-      this.crossfade = Number(value);
-      if (!this.context) return;
-      const left = this.deckNodes.get('A')?.fade;
-      const right = this.deckNodes.get('B')?.fade;
-      if (left) left.gain.setTargetAtTime(1 - this.crossfade, this.context.currentTime, 0.025);
-      if (right) right.gain.setTargetAtTime(this.crossfade, this.context.currentTime, 0.025);
-    }
+    this.crossfade = Number(value);
+
+    if (!this.context) return;
+
+    const leftGain = 1 - this.crossfade;
+    const rightGain = this.crossfade;
+
+    ['A', 'C'].forEach((deck) => {
+        const fade = this.deckNodes.get(deck)?.fade;
+
+        if (fade) {
+            fade.gain.setTargetAtTime(
+                leftGain,
+                this.context.currentTime,
+                0.025
+            );
+        }
+    });
+
+    ['B', 'D'].forEach((deck) => {
+        const fade = this.deckNodes.get(deck)?.fade;
+
+        if (fade) {
+            fade.gain.setTargetAtTime(
+                rightGain,
+                this.context.currentTime,
+                0.025
+            );
+        }
+    });
+}
     async recordMicrophone(seconds = 12) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const chunks = [];
