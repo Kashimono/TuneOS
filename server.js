@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const express = require('express');
 const multer = require('multer');
+const { execFile } = require('node:child_process');
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
@@ -30,6 +31,27 @@ const allowedIps = (process.env.ALLOWED_CLIENT_IPS || '').split(',').map((v) => 
 const db = new DatabaseSync(path.join(DATA_DIR, 'tuneos.sqlite'));
 db.exec(fs.readFileSync(path.join(DATA_DIR, 'schema.sql'), 'utf8'));
 db.exec('PRAGMA journal_mode = WAL;');
+
+const FIREWALL_WRAPPER_PATH = '/usr/local/sbin/tuneos-firewall';
+
+function getUfwStatus() {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'sudo',
+      ['-n', FIREWALL_WRAPPER_PATH, 'status'],
+      { timeout: 5000, maxBuffer: 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          return reject(new Error(stderr.trim() || error.message || 'Firewall status command failed.'));
+        }
+
+        const status = stdout.trim();
+        if (!status) return reject(new Error('Firewall status wrapper returned no output.'));
+        resolve(status);
+      }
+    );
+  });
+}
 
 const app = express();
 app.disable('x-powered-by');
@@ -178,6 +200,15 @@ app.get('/api/system/metrics', (_req, res) => {
     memoryTotal: total, memoryFree: free, memoryUsed: total - free,
     loadAverage: os.loadavg(), cpus: os.cpus().length, wsl: Boolean(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP)
   });
+});
+app.get('/api/firewall/status', async (_req, res) => {
+  try {
+    const status = await getUfwStatus();
+    res.json({ status });
+  } catch (error) {
+    log('firewall', `UFW status request failed: ${error.message}`, 'warning');
+    res.status(503).json({ error: 'Unable to retrieve UFW status through the configured wrapper.', detail: error.message });
+  }
 });
 app.get('/api/firewall', (_req, res) => res.json({ simulated: true, allowlist: allowedIps, rules: db.prepare('SELECT * FROM firewall_rules ORDER BY id DESC').all() }));
 app.post('/api/firewall/rules', (req, res) => {
