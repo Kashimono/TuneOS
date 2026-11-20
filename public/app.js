@@ -63,6 +63,7 @@
     if (!state.studio.id && projects[0]) { state.studio.id = projects[0].id; state.studio.name = projects[0].name; state.studio.clips = projects[0].data?.clips || []; }
     Object.assign(state.settings, settings);
     document.body.classList.toggle('theme-light', state.settings.theme === 'light');
+    document.documentElement.style.colorScheme = state.settings.theme === 'light' ? 'light' : 'dark';
   }
 
   function iconMarkup(app) { return `<span class="window-app-icon ${app.tone}">${app.icon}</span>`; }
@@ -272,6 +273,7 @@
   function updateTheme(theme) {
     state.settings.theme = theme;
     document.body.classList.toggle('theme-light', theme === 'light');
+    document.documentElement.style.colorScheme = theme === 'light' ? 'light' : 'dark';
     api('/api/settings/theme', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: theme }) }).catch(() => {});
     refreshApp('settings');
   }
