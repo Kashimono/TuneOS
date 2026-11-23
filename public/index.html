@@ -44,7 +44,16 @@
     </main>
 
     <footer id="dock" class="dock" aria-label="App dock">
-      <button class="dock-launcher" data-open="launcher" aria-label="All apps"><span>◈</span></button>
+      <button class="dock-launcher" data-open="launcher"
+    aria-label="Search apps and tracks" title="Search">
+    <svg class="dock-search-icon" viewBox="0 0 24 24"
+        aria-hidden="true" fill="none" stroke="currentColor"
+        stroke-width="2" stroke-linecap="round"
+        stroke-linejoin="round">
+        <circle cx="10.8" cy="10.8" r="6.8"></circle>
+        <path d="m16 16 4.5 4.5"></path>
+    </svg>
+</button>
       <span class="dock-separator"></span>
       <button class="dock-app active" data-app="dj" title="DJ Studio"><span class="dock-glyph violet">♫</span></button>
       <button class="dock-app" data-app="studio" title="Audio Studio"><span class="dock-glyph cyan">▥</span></button>
