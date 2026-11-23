@@ -32,7 +32,12 @@
     const response = await fetch(url, { credentials: 'same-origin', ...options });
     if (response.status === 204) return null;
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
+    if (!response.ok) {
+      if (response.status === 401 && !url.startsWith('/api/auth/')) lockToLogin('Your TuneOS session has expired. Please sign in again.');
+      const error = new Error(data.error || `Request failed (${response.status}).`);
+      error.status = response.status;
+      throw error;
+    }
     return data;
   }
   function toast(message, tone = '') {
@@ -41,6 +46,33 @@
   }
   function log(message, category = 'desktop', level = 'info') {
     api('/api/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category, level, message }) }).catch(() => {});
+  }
+  function updateProfileButton() {
+    const button = $('#profile-avatar');
+    if (!button) return;
+    button.textContent = state.user ? state.user.username.slice(0, 1).toUpperCase() : 'M';
+    button.title = state.user ? `Signed in as ${state.user.username}` : 'Open account profile';
+    button.setAttribute('aria-label', state.user ? `Open profile for ${state.user.username}` : 'Open account profile');
+  }
+  function lockToLogin(message = '') {
+    state.user = null;
+    state.profileMode = 'login';
+    state.profileMessage = message;
+    for (const deck of ['A', 'B', 'C', 'D', 'studio']) audio.stop(deck);
+    state.decks.A.playing = state.decks.B.playing = state.decks.C.playing = state.decks.D.playing = false;
+    state.studio.playing = false;
+    for (const id of [...state.windows.keys()]) closeApp(id);
+    document.body.classList.remove('auth-pending');
+    document.body.classList.add('auth-required');
+    const profile = $('#profile');
+    if (profile) profile.hidden = false;
+    updateProfileButton();
+    renderProfile();
+  }
+  function unlockWorkspace() {
+    document.body.classList.remove('auth-pending', 'auth-required');
+    $('#profile').hidden = true;
+    updateProfileButton();
   }
   function duration(seconds) {
     const value = Math.max(0, Number(seconds) || 0);
@@ -70,6 +102,7 @@
 
   function iconMarkup(app) { return `<span class="window-app-icon ${app.tone}">${app.icon}</span>`; }
   function openApp(id) {
+    if (!state.user) return;
     hideOverlays();
     if (id === 'launcher') { showOverlay('launcher'); return; }
     if (!APPS[id]) return;
@@ -112,11 +145,15 @@
     const win = state.windows.get(id); if (win) $('.window-content', win).innerHTML = appView(id);
   }
   function showOverlay(id) {
+    if (!state.user && id !== 'profile') return;
     hideOverlays(); const el = $(`#${id}`); if (el) { el.hidden = false; if (id === 'launcher') $('#launcher-search').focus(); if (id === 'search') $('#global-search').focus(); }
     if (id === 'notifications') refreshNotifications();
     if (id === 'profile') renderProfile();
   }
-  function hideOverlays() { $$('.overlay').forEach((item) => { item.hidden = true; }); }
+  function hideOverlays() {
+    if (document.body.classList.contains('auth-required')) return;
+    $$('.overlay').forEach((item) => { item.hidden = true; });
+  }
   function updateClock() {
     const now = new Date(); const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const day = now.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -160,15 +197,9 @@
   async function refreshProfile() {
     try {
       const data = await api('/api/auth/session');
-      state.user = data.user;
-      const button = $('#profile-avatar');
-      if (button) {
-        button.textContent = state.user ? state.user.username.slice(0, 1).toUpperCase() : 'M';
-        button.title = state.user ? `Signed in as ${state.user.username}` : 'Open account profile';
-        button.setAttribute('aria-label', state.user ? `Open profile for ${state.user.username}` : 'Open account profile');
-      }
-      if (!$('#profile').hidden) renderProfile();
-    } catch { /* Account UI stays usable when the session endpoint is unavailable. */ }
+      if (!data.user) lockToLogin('Your TuneOS session has expired. Please sign in again.');
+      else { state.user = data.user; updateProfileButton(); }
+    } catch { /* A transient check failure does not discard a still-valid local session. */ }
   }
 
   function appView(id) {
@@ -426,9 +457,7 @@
     if (action === 'profile-mode') { state.profileMode = el.dataset.mode === 'register' ? 'register' : 'login'; state.profileMessage = ''; renderProfile(); return; }
     if (action === 'logout') {
       await api('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      state.user = null; state.profileMode = 'login'; state.profileMessage = '';
-      const button = $('#profile-avatar'); if (button) { button.textContent = 'M'; button.title = 'Open account profile'; button.setAttribute('aria-label', 'Open account profile'); }
-      renderProfile(); toast('You have been logged out.'); return;
+      lockToLogin(); toast('You have been logged out.'); return;
     }
     if (action === 'settings-tab') { toast(`${el.dataset.tab} preferences are shown in this workspace panel.`); return; }
     if (action === 'refresh-metrics') { await refreshMetrics(); toast('Host metrics refreshed.'); return; }
@@ -440,6 +469,7 @@
   }
 
   document.addEventListener('click', async (event) => {
+    if (!state.user && !event.target.closest('#profile')) return;
     const winAction = event.target.closest('[data-window-action]');
     if (winAction) {
       const win = winAction.closest('[data-window]'); const action = winAction.dataset.windowAction; const id = win.dataset.window;
@@ -506,8 +536,12 @@
       try {
         const data = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
         state.user = data.user; state.profileMessage = '';
-        const button = $('#profile-avatar'); if (button) { button.textContent = state.user.username.slice(0, 1).toUpperCase(); button.title = `Signed in as ${state.user.username}`; button.setAttribute('aria-label', `Open profile for ${state.user.username}`); }
-        renderProfile(); toast(accountForm.dataset.mode === 'register' ? 'TuneOS account created.' : 'You are logged in.');
+        unlockWorkspace();
+        try { await loadData(); }
+        catch (error) { if (error.status === 401) return; toast(`TuneOS data could not be loaded: ${error.message}`); }
+        if (!state.user) return;
+        renderLauncher(); openApp('dj');
+        toast(accountForm.dataset.mode === 'register' ? 'TuneOS account created.' : 'You are logged in.');
       } catch (error) {
         state.profileMessage = error.message;
         if (errorTarget) errorTarget.textContent = error.message;
@@ -538,6 +572,7 @@
   });
   document.addEventListener('pointerup', () => { drag = null; });
   document.addEventListener('keydown', (event) => {
+    if (!state.user) { if (event.key === 'Escape') event.preventDefault(); return; }
     if (event.key === 'Escape') hideOverlays();
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && state.settings.shortcuts !== false) { event.preventDefault(); renderSearch(''); showOverlay('search'); }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'shift' && event.code === 'KeyK') { event.preventDefault(); showOverlay('launcher'); }
@@ -546,8 +581,22 @@
 
   const uploadInput = document.createElement('input'); uploadInput.id = 'audio-upload'; uploadInput.type = 'file'; uploadInput.accept = 'audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac,.webm'; uploadInput.hidden = true;
   document.body.append(uploadInput);
-  renderLauncher(); updateClock(); window.setInterval(updateClock, 15000);
-  loadData().then(() => { renderLauncher(); openApp(new URLSearchParams(location.search).get('demo') === '1' ? 'dj' : 'dj'); })
-    .catch((error) => { toast(`TuneOS API unavailable: ${error.message}`); openApp('dj'); });
-  refreshProfile();
+  renderLauncher(); updateProfileButton(); updateClock(); window.setInterval(updateClock, 15000);
+  (async () => {
+    let session;
+    try {
+      session = await api('/api/auth/session');
+    } catch (error) {
+      lockToLogin(`TuneOS could not verify your session. ${error.message || 'Please refresh and try again.'}`);
+      return;
+    }
+    if (!session.user) { lockToLogin(); return; }
+    state.user = session.user;
+    unlockWorkspace();
+    try { await loadData(); }
+    catch (error) { if (error.status === 401 || !state.user) return; toast(`TuneOS data could not be loaded: ${error.message}`); }
+    if (!state.user) return;
+    renderLauncher(); openApp('dj');
+    window.setInterval(() => { if (state.user) refreshProfile(); }, 30000);
+  })();
 })();

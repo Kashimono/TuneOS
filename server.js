@@ -238,6 +238,21 @@ app.post('/api/auth/logout', (req, res) => {
   res.json({ ok: true });
 });
 
+function requireAuthentication(req, res, next) {
+  res.set('Cache-Control', 'no-store');
+  const user = findSessionUser(req);
+  if (!user) {
+    if (readSessionToken(req)) clearSessionCookie(req, res);
+    return res.status(401).json({ error: 'Sign in to use TuneOS.' });
+  }
+  req.user = user;
+  next();
+}
+
+// Keep health and the account endpoints public; every application API route
+// below this point requires a live session in SQLite.
+app.use('/api', requireAuthentication);
+
 app.get('/api/tracks', (req, res) => {
   const search = `%${String(req.query.search || '').slice(0, 100)}%`;
   const genre = String(req.query.genre || '');
