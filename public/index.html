@@ -19,7 +19,7 @@
         <button class="icon-button" data-open="notifications" aria-label="Notifications">◉</button>
         <button class="status-button" data-open="quick-settings"><span>⌁</span> <span>◕</span> <span>▰</span></button>
         <button class="clock-button" data-open="quick-settings"><strong id="clock">--:--</strong><small id="date">---</small></button>
-        <button class="avatar-button" data-open="settings" aria-label="Open profile and settings">M</button>
+        <button id="profile-avatar" class="avatar-button" data-open="profile" aria-label="Open account profile">M</button>
       </div>
     </header>
 
@@ -80,6 +80,7 @@
     </section>
     <section id="quick-settings" class="overlay popover" hidden><div class="overlay-card popover-card"><div class="popover-title"><div><span class="eyebrow">SYSTEM</span><h3>Quick settings</h3></div><button class="icon-button" data-close-overlay>×</button></div><div class="quick-row"><span>Audio engine</span><b class="good-label">● Ready</b></div><div class="quick-row"><span>Theme</span><button class="text-button" data-theme-toggle>Toggle theme</button></div><div class="quick-row"><span>Connection</span><b class="muted">Local</b></div><button class="secondary-button full" data-app="settings">Open Settings</button></div></section>
     <section id="notifications" class="overlay popover notifications-popover" hidden><div class="overlay-card popover-card"><div class="popover-title"><div><span class="eyebrow">ACTIVITY</span><h3>Notifications</h3></div><button class="icon-button" data-close-overlay>×</button></div><div id="notification-list" class="notification-list"><p class="muted">You're all caught up.</p></div></div></section>
+    <section id="profile" class="overlay profile-overlay" hidden aria-label="TuneOS account"><div class="overlay-card profile-card"><div class="popover-title"><div><span class="eyebrow">TUNEOS ACCOUNT</span><h3>Profile</h3></div><button class="icon-button" data-close-overlay aria-label="Close profile">×</button></div><div id="profile-content"></div></div></section>
     <div id="toast-region" class="toast-region" aria-live="polite"></div>
   </div>
   <script src="/audio-engine.js"></script>

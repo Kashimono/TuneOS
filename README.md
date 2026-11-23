@@ -56,12 +56,15 @@ TuneOS creates `database/tuneos.sqlite` and `storage/audio/` on first run. The d
 ## API routes
 
 - `GET /api/health`
+- `GET /api/auth/session`, `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`
 - `GET /api/tracks`, `POST /api/tracks/import`, `PATCH /api/tracks/:id`, `DELETE /api/tracks/:id`, `GET /api/audio/:id`
 - `GET /api/projects`, `POST /api/projects`, `PUT /api/projects/:id`, `DELETE /api/projects/:id`
 - `GET /api/settings`, `PUT /api/settings/:key`
 - `GET /api/system/metrics`
 - `GET /api/firewall`, `POST /api/firewall/rules`, `PATCH /api/firewall/rules/:id`, `DELETE /api/firewall/rules/:id`
 - `GET /api/activity`, `POST /api/activity`
+
+Account records are stored in SQLite's `users` table. Passwords use salted scrypt hashes; session tokens are random, expire after seven days, and are stored hashed in the `sessions` table. The browser cookie is HTTP-only and SameSite strict, and is marked Secure when TuneOS is reached over HTTPS. On the documented plain HTTP setup, the connection itself is not encrypted, so use a unique password and do not expose the app to untrusted networks. Accounts currently identify the user in the interface; existing tracks, projects, and settings remain shared by this local TuneOS instance.
 
 ## WSL, firewall, and IP allowlisting
 
@@ -93,7 +96,7 @@ WSL2 NAT, mirrored mode, Hyper-V Firewall, and Windows Firewall affect how inbou
 - The Figma Make source bundle was recoverable and its original source snapshot contains the project, but that downloaded snapshot predates the latest live preview revision. The current preview was inspected separately; this implementation follows the current desktop shell and app surfaces, while the archive's older UI-specific assets are retained under `public/assets/reference/` rather than misrepresented as current artwork.
 - The original Figma project did not include audio files for its demo songs. Demo playback is synthesized; imported local files play as actual audio.
 - Reverb, delay, and EQ controls are interface foundations and are not yet applied to the rendered WAV. WAV export currently mixes imported clips at their stored timeline positions.
-- Account sign-in, cloud sync, and production-grade multi-user access control are not implemented. The default loopback bind is the intended setup.
+- Cloud sync and per-user isolation of tracks, projects, and settings are not implemented. The default loopback bind is the intended setup; account login over plain HTTP is not suitable for untrusted networks.
 - Firewall manager rules and CPU scheduling are educational UI simulations. They do not control the host OS.
 - Browser microphone recording requires microphone permission and a secure browser context. `localhost` is treated as a secure context by modern browsers.
 

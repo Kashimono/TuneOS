@@ -21,6 +21,7 @@
   const APPS = Object.fromEntries(APP_LIST.map((item) => [item[0], { id: item[0], name: item[1], icon: item[2], tone: item[3], description: item[4] }]));
   const state = {
     tracks: [], projects: [], settings: { theme: 'dark', shortcuts: true }, windows: new Map(), z: 10, activeApp: null,
+    user: null, profileMode: 'login', profileMessage: '', selectedDeck: 'A',
     deckCount: 2, decks: { A: { trackId: 1, playing: false, volume: 0.82, pitch: 0 }, B: { trackId: 5, playing: false, volume: 0.76, pitch: 0 }, C: { trackId: 6, playing: false, volume: 0.76, pitch: 0 }, D: { trackId: 7, playing: false, volume: 0.76, pitch: 0 } },
     master: 0.8, crossfade: 0.5, libraryGenre: 'All', librarySearch: '', studio: { id: null, name: 'Untitled Audio Project', clips: [], effects: { Reverb: true, Delay: false, Equalizer: true }, recording: false, playing: false, undo: [], redo: [] }, metrics: null, schedulerMode: 'FCFS'
   };
@@ -28,7 +29,7 @@
   const windowsEl = $('#windows');
 
   async function api(url, options = {}) {
-    const response = await fetch(url, options);
+    const response = await fetch(url, { credentials: 'same-origin', ...options });
     if (response.status === 204) return null;
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
@@ -64,6 +65,7 @@
     Object.assign(state.settings, settings);
     document.body.classList.toggle('theme-light', state.settings.theme === 'light');
     document.documentElement.style.colorScheme = state.settings.theme === 'light' ? 'light' : 'dark';
+    $('meta[name="theme-color"]').content = state.settings.theme === 'light' ? '#e9edf4' : '#080d19';
   }
 
   function iconMarkup(app) { return `<span class="window-app-icon ${app.tone}">${app.icon}</span>`; }
@@ -112,6 +114,7 @@
   function showOverlay(id) {
     hideOverlays(); const el = $(`#${id}`); if (el) { el.hidden = false; if (id === 'launcher') $('#launcher-search').focus(); if (id === 'search') $('#global-search').focus(); }
     if (id === 'notifications') refreshNotifications();
+    if (id === 'profile') renderProfile();
   }
   function hideOverlays() { $$('.overlay').forEach((item) => { item.hidden = true; }); }
   function updateClock() {
@@ -143,6 +146,31 @@
     } catch { /* Desktop still works offline. */ }
   }
 
+  function renderProfile() {
+    const target = $('#profile-content'); if (!target) return;
+    if (state.user) {
+      const created = state.user.createdAt ? new Date(`${state.user.createdAt.replace(' ', 'T')}Z`).toLocaleDateString() : '—';
+      target.innerHTML = `<div class="profile-summary"><span class="profile-avatar-large">${esc(state.user.username.slice(0, 1).toUpperCase())}</span><div><strong>${esc(state.user.username)}</strong><small>Signed in to this TuneOS instance</small></div></div><div class="setting-line"><div><strong>Username</strong></div><span>${esc(state.user.username)}</span></div><div class="setting-line"><div><strong>Email</strong></div><span>${esc(state.user.email)}</span></div><div class="setting-line"><div><strong>Account created</strong></div><span>${esc(created)}</span></div><p id="profile-error" class="profile-error" role="status"></p><button class="small-button danger profile-submit" data-action="logout">Log out</button>`;
+      return;
+    }
+    const registering = state.profileMode === 'register';
+    target.innerHTML = `<div class="profile-tabs"><button class="pill ${!registering ? 'active' : ''}" data-action="profile-mode" data-mode="login">Login</button><button class="pill ${registering ? 'active' : ''}" data-action="profile-mode" data-mode="register">Create Account</button></div><p class="profile-intro">${registering ? 'Create a local TuneOS account.' : 'Log in to your TuneOS account.'}</p><form data-form="account" data-mode="${registering ? 'register' : 'login'}"><label class="form-label" for="account-identifier">${registering ? 'Username' : 'Username or email'}</label><input id="account-identifier" class="text-input" name="${registering ? 'username' : 'identifier'}" autocomplete="username" minlength="${registering ? '3' : '1'}" maxlength="${registering ? '24' : '254'}" ${registering ? 'pattern="[A-Za-z0-9_]{3,24}"' : ''} required>${registering ? '<label class="form-label" for="account-email">Email</label><input id="account-email" class="text-input" type="email" name="email" autocomplete="email" maxlength="254" required>' : ''}<label class="form-label" for="account-password">Password</label><input id="account-password" class="text-input" type="password" name="password" autocomplete="${registering ? 'new-password' : 'current-password'}" minlength="${registering ? '10' : '1'}" maxlength="128" required><p class="profile-hint">${registering ? 'Use 10–128 characters. Choose a unique password.' : 'Passwords are stored as salted scrypt hashes.'}</p><p id="profile-error" class="profile-error" role="alert">${esc(state.profileMessage)}</p><button class="small-button primary profile-submit" type="submit">${registering ? 'Create Account' : 'Login'}</button></form>`;
+  }
+
+  async function refreshProfile() {
+    try {
+      const data = await api('/api/auth/session');
+      state.user = data.user;
+      const button = $('#profile-avatar');
+      if (button) {
+        button.textContent = state.user ? state.user.username.slice(0, 1).toUpperCase() : 'M';
+        button.title = state.user ? `Signed in as ${state.user.username}` : 'Open account profile';
+        button.setAttribute('aria-label', state.user ? `Open profile for ${state.user.username}` : 'Open account profile');
+      }
+      if (!$('#profile').hidden) renderProfile();
+    } catch { /* Account UI stays usable when the session endpoint is unavailable. */ }
+  }
+
   function appView(id) {
     if (id === 'dj') return renderDj();
     if (id === 'studio') return renderStudio();
@@ -161,7 +189,9 @@
   }
   function renderDj() {
     const deckIds = ['A', 'B', ...(state.deckCount === 4 ? ['C', 'D'] : [])];
-    return `<div class="app-view dj-view"><div class="view-header"><div><span class="eyebrow">DJ WORKSPACE</span><h2>DJ Studio</h2><p>Load tracks, shape the blend, and save your mix.</p></div><div class="view-actions"><label class="pill"><input type="radio" name="deck-count" value="2" ${state.deckCount === 2 ? 'checked' : ''} data-action="deck-count"> 2 decks</label><label class="pill"><input type="radio" name="deck-count" value="4" ${state.deckCount === 4 ? 'checked' : ''} data-action="deck-count"> 4 decks</label><button class="small-button" data-action="import-audio">＋ Import</button><button class="small-button primary" data-action="save-mix">Save mix</button></div></div><div class="toolbar"><span class="pill active">● Audio engine ready</span><span class="muted">Preview mode synthesizes a short beat for demo tracks. Imported audio plays from local storage.</span></div><div class="deck-grid ${state.deckCount === 4 ? 'four' : ''}">${deckIds.map(renderDeck).join('')}</div><div class="mix-footer"><strong>MASTER</strong><div class="slider-line" style="flex:0 0 130px;margin:0"><input type="range" min="0" max="100" value="${Math.round(state.master * 100)}" data-action="master"><output>${Math.round(state.master * 100)}%</output></div><div class="crossfader"><span>A</span><input type="range" min="0" max="100" value="${Math.round(state.crossfade * 100)}" data-action="crossfade"><span>B</span></div><button class="small-button icon" data-action="stop-all">Stop all</button></div><div class="deck-library"><div class="view-header"><div><span class="eyebrow">TRACK CRATE</span><h2 style="font-size:13px">Library tracks</h2></div><span class="muted">${state.tracks.length} tracks</span></div>${renderTrackTable(state.tracks.slice(0, 8), 'dj')}</div></div>`;
+    if (!deckIds.includes(state.selectedDeck)) state.selectedDeck = 'A';
+    const fadeLabels = state.deckCount === 4 ? ['A / C', 'B / D'] : ['A', 'B'];
+    return `<div class="app-view dj-view"><div class="view-header"><div><span class="eyebrow">DJ WORKSPACE</span><h2>DJ Studio</h2><p>Load tracks, shape the blend, and save your mix.</p></div><div class="view-actions"><label class="pill"><input type="radio" name="deck-count" value="2" ${state.deckCount === 2 ? 'checked' : ''} data-action="deck-count"> 2 decks</label><label class="pill"><input type="radio" name="deck-count" value="4" ${state.deckCount === 4 ? 'checked' : ''} data-action="deck-count"> 4 decks</label><button class="small-button" data-action="import-audio">＋ Import</button><button class="small-button primary" data-action="save-mix">Save mix</button></div></div><div class="toolbar"><span class="pill active">● Audio engine ready</span><span class="muted">Preview mode synthesizes a short beat for demo tracks. Imported audio plays from local storage.</span></div><div class="deck-grid ${state.deckCount === 4 ? 'four' : ''}">${deckIds.map(renderDeck).join('')}</div><div class="mix-footer"><strong>MASTER</strong><div class="slider-line" style="flex:0 0 130px;margin:0"><input type="range" min="0" max="100" value="${Math.round(state.master * 100)}" data-action="master"><output>${Math.round(state.master * 100)}%</output></div><div class="crossfader"><span>${fadeLabels[0]}</span><input type="range" min="0" max="100" value="${Math.round(state.crossfade * 100)}" data-action="crossfade" aria-label="Crossfade between ${fadeLabels.join(' and ')}"><span>${fadeLabels[1]}</span></div><button class="small-button icon" data-action="stop-all">Stop all</button></div><div class="deck-library"><div class="view-header"><div><span class="eyebrow">TRACK CRATE</span><h2 style="font-size:13px">Library tracks</h2><p>Select a deck, then click a song once to load it.</p></div><div class="view-actions"><label class="muted" for="track-target-deck">Load into</label><select id="track-target-deck" class="select-control" data-action="target-deck">${deckIds.map((id) => `<option value="${id}" ${state.selectedDeck === id ? 'selected' : ''}>Deck ${id}</option>`).join('')}</select><span class="muted">${state.tracks.length} tracks</span></div></div>${renderTrackTable(state.tracks.slice(0, 8), 'dj')}</div></div>`;
   }
   function renderDeck(id) {
     const deck = state.decks[id]; const track = trackById(deck.trackId) || state.tracks[0];
@@ -170,7 +200,9 @@
   }
   function renderTrackTable(tracks, context = 'library') {
     if (!tracks.length) return '<div class="empty-state"><strong>No tracks yet</strong>Import a local audio file to add it to your library.</div>';
-    return `<div class="table-wrap"><table class="data-table"><thead><tr><th>TRACK</th><th>GENRE</th><th>BPM</th><th>DURATION</th><th>SOURCE</th><th>ACTIONS</th></tr></thead><tbody>${tracks.map((track) => `<tr data-search="${esc(`${track.title} ${track.artist}`.toLowerCase())}"><td><div class="track-cell"><span class="cover-art" style="background:${colorFor(track)}">♫</span><span><strong>${esc(track.title)}</strong><small>${esc(track.artist)}</small></span></div></td><td><span class="tag">${esc(track.genre)}</span></td><td>${track.bpm || '—'}</td><td class="mono">${duration(track.duration_seconds)}</td><td>${track.source === 'imported' ? 'Imported' : 'Library'}</td><td><div class="view-actions"><button class="small-button icon" data-action="load-track" data-track="${track.id}" data-deck="A" title="Load in DJ Studio">Load</button>${context === 'library' ? `<button class="small-button icon" data-action="rename-track" data-track="${track.id}">Rename</button><button class="small-button icon danger" data-action="delete-track" data-track="${track.id}">Delete</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>`;
+    const selectable = context === 'dj';
+    const targetDeck = selectable ? state.selectedDeck : 'A';
+    return `<div class="table-wrap"><table class="data-table"><thead><tr><th>TRACK</th><th>GENRE</th><th>BPM</th><th>DURATION</th><th>SOURCE</th><th>ACTIONS</th></tr></thead><tbody>${tracks.map((track) => `<tr class="${selectable ? `track-selectable ${Number(state.decks[targetDeck].trackId) === Number(track.id) ? 'selected' : ''}` : ''}" ${selectable ? `data-action="load-track" data-track="${track.id}" data-deck="${targetDeck}" tabindex="0" title="Click once to load on Deck ${targetDeck}"` : ''} data-search="${esc(`${track.title} ${track.artist}`.toLowerCase())}"><td><div class="track-cell"><span class="cover-art" style="background:${colorFor(track)}">♫</span><span><strong>${esc(track.title)}</strong><small>${esc(track.artist)}</small></span></div></td><td><span class="tag">${esc(track.genre)}</span></td><td>${track.bpm || '—'}</td><td class="mono">${duration(track.duration_seconds)}</td><td>${track.source === 'imported' ? 'Imported' : 'Library'}</td><td><div class="view-actions"><button class="small-button icon" data-action="load-track" data-track="${track.id}" data-deck="${targetDeck}" title="Load in Deck ${targetDeck}">Load</button>${context === 'library' ? `<button class="small-button icon" data-action="rename-track" data-track="${track.id}">Rename</button><button class="small-button icon danger" data-action="delete-track" data-track="${track.id}">Delete</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>`;
   }
 
   function renderLibrary() {
@@ -281,6 +313,7 @@
     state.settings.theme = theme;
     document.body.classList.toggle('theme-light', theme === 'light');
     document.documentElement.style.colorScheme = theme === 'light' ? 'light' : 'dark';
+    $('meta[name="theme-color"]').content = theme === 'light' ? '#e9edf4' : '#080d19';
     api('/api/settings/theme', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: theme }) }).catch(() => {});
     refreshApp('settings');
   }
@@ -350,7 +383,7 @@
     const trackId = Number(el.dataset.track); const deckId = el.dataset.deck || 'A';
     if (action === 'import-audio') return startUpload(el.closest('[data-window]')?.dataset.window || 'library');
     if (action === 'deck-count') { state.deckCount = Number(el.value); refreshApp('dj'); return; }
-    if (action === 'deck-load') { if (el.value) state.decks[deckId].trackId = Number(el.value); state.decks[deckId].playing = false; audio.stop(deckId); refreshApp('dj'); return; }
+    if (action === 'deck-load') { state.selectedDeck = deckId; if (el.value) state.decks[deckId].trackId = Number(el.value); state.decks[deckId].playing = false; audio.stop(deckId); refreshApp('dj'); return; }
     if (action === 'play-deck') {
       const deck = state.decks[deckId]; const track = trackById(deck.trackId);
       if (deck.playing) { audio.stop(deckId); deck.playing = false; }
@@ -387,6 +420,13 @@
     if (action === 'undo') { if (state.studio.undo.length) { state.studio.redo.push(JSON.stringify(state.studio.clips)); state.studio.clips = JSON.parse(state.studio.undo.pop()); refreshApp('studio'); } else toast('Nothing to undo.'); return; }
     if (action === 'redo') { if (state.studio.redo.length) { state.studio.undo.push(JSON.stringify(state.studio.clips)); state.studio.clips = JSON.parse(state.studio.redo.pop()); refreshApp('studio'); } else toast('Nothing to redo.'); return; }
     if (action === 'toggle-shortcut') { state.settings.shortcuts = state.settings.shortcuts === false; api('/api/settings/shortcuts', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: state.settings.shortcuts }) }).catch(() => {}); refreshApp('settings'); return; }
+    if (action === 'profile-mode') { state.profileMode = el.dataset.mode === 'register' ? 'register' : 'login'; state.profileMessage = ''; renderProfile(); return; }
+    if (action === 'logout') {
+      await api('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      state.user = null; state.profileMode = 'login'; state.profileMessage = '';
+      const button = $('#profile-avatar'); if (button) { button.textContent = 'M'; button.title = 'Open account profile'; button.setAttribute('aria-label', 'Open account profile'); }
+      renderProfile(); toast('You have been logged out.'); return;
+    }
     if (action === 'settings-tab') { toast(`${el.dataset.tab} preferences are shown in this workspace panel.`); return; }
     if (action === 'refresh-metrics') { await refreshMetrics(); toast('Host metrics refreshed.'); return; }
     if (action === 'refresh-activity') { await refreshActivity(); return; }
@@ -425,6 +465,7 @@
     }
     if (el.matches('[data-action="deck-load"]')) { try { await handleAction('deck-load', el); } catch (error) { toast(error.message); } return; }
     if (el.matches('[data-action="deck-count"]')) { state.deckCount = Number(el.value); refreshApp('dj'); return; }
+    if (el.matches('[data-action="target-deck"]')) { state.selectedDeck = el.value; refreshApp('dj'); return; }
     if (el.matches('[data-action="scheduler-mode"]')) { state.schedulerMode = el.value; refreshApp('scheduler'); return; }
     if (el.matches('[data-action="master"]')) { state.master = Number(el.value) / 100; audio.setMaster(state.master).catch(() => {}); return; }
     if (el.matches('[data-action="crossfade"]')) { state.crossfade = Number(el.value) / 100; audio.setCrossfade(state.crossfade); return; }
@@ -452,6 +493,24 @@
     }
   });
   document.addEventListener('submit', async (event) => {
+    const accountForm = event.target.closest('[data-form="account"]');
+    if (accountForm) {
+      event.preventDefault();
+      const values = Object.fromEntries(new FormData(accountForm));
+      const endpoint = accountForm.dataset.mode === 'register' ? '/api/auth/register' : '/api/auth/login';
+      const errorTarget = $('#profile-error');
+      if (errorTarget) errorTarget.textContent = '';
+      try {
+        const data = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
+        state.user = data.user; state.profileMessage = '';
+        const button = $('#profile-avatar'); if (button) { button.textContent = state.user.username.slice(0, 1).toUpperCase(); button.title = `Signed in as ${state.user.username}`; button.setAttribute('aria-label', `Open profile for ${state.user.username}`); }
+        renderProfile(); toast(accountForm.dataset.mode === 'register' ? 'TuneOS account created.' : 'You are logged in.');
+      } catch (error) {
+        state.profileMessage = error.message;
+        if (errorTarget) errorTarget.textContent = error.message;
+      }
+      return;
+    }
     const form = event.target.closest('[data-form="firewall"]'); if (!form) return;
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form));
@@ -487,4 +546,5 @@
   renderLauncher(); updateClock(); window.setInterval(updateClock, 15000);
   loadData().then(() => { renderLauncher(); openApp(new URLSearchParams(location.search).get('demo') === '1' ? 'dj' : 'dj'); })
     .catch((error) => { toast(`TuneOS API unavailable: ${error.message}`); openApp('dj'); });
+  refreshProfile();
 })();

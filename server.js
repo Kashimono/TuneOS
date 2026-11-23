@@ -5,6 +5,7 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+const { promisify } = require('node:util');
 const express = require('express');
 const multer = require('multer');
 const { execFile } = require('node:child_process');
@@ -31,6 +32,12 @@ const allowedIps = (process.env.ALLOWED_CLIENT_IPS || '').split(',').map((v) => 
 const db = new DatabaseSync(path.join(DATA_DIR, 'tuneos.sqlite'));
 db.exec(fs.readFileSync(path.join(DATA_DIR, 'schema.sql'), 'utf8'));
 db.exec('PRAGMA journal_mode = WAL;');
+db.exec('PRAGMA foreign_keys = ON;');
+
+const scrypt = promisify(crypto.scrypt);
+const SESSION_COOKIE = 'tuneos.sid';
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
+const SCRYPT_OPTIONS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 
 const FIREWALL_WRAPPER_PATH = '/usr/local/sbin/tuneos-firewall';
 
@@ -96,6 +103,65 @@ function publicTrack(track) {
 }
 function safeTrackName(name) { return path.basename(name || 'audio').replace(/[\r\n]/g, '').slice(0, 180); }
 
+function publicUser(user) {
+  return { userId: user.user_id, username: user.username, email: user.email, createdAt: user.created_at };
+}
+function readSessionToken(req) {
+  const entry = (req.headers.cookie || '').split(';').map((part) => part.trim()).find((part) => part.startsWith(`${SESSION_COOKIE}=`));
+  const token = entry?.slice(SESSION_COOKIE.length + 1) || '';
+  return /^[A-Za-z0-9_-]{43}$/.test(token) ? token : null;
+}
+function sessionCookie(token, req, maxAge = SESSION_TTL_SECONDS) {
+  const parts = [`${SESSION_COOKIE}=${token}`, 'Path=/', 'HttpOnly', 'SameSite=Strict', `Max-Age=${maxAge}`];
+  if (req.socket.encrypted) parts.push('Secure');
+  return parts.join('; ');
+}
+function clearSessionCookie(req, res) { res.setHeader('Set-Cookie', sessionCookie('', req, 0)); }
+function requestHasSameOrigin(req) {
+  const origin = req.get('origin');
+  if (origin) {
+    try { return new URL(origin).origin === `${req.protocol}://${req.get('host')}`; }
+    catch { return false; }
+  }
+  return req.get('sec-fetch-site') !== 'cross-site';
+}
+function requireSameOrigin(req, res) {
+  if (requestHasSameOrigin(req)) return true;
+  res.status(403).json({ error: 'This account request must come from TuneOS.' });
+  return false;
+}
+function findSessionUser(req) {
+  const token = readSessionToken(req);
+  if (!token) return null;
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const row = db.prepare(`SELECT users.id, users.user_id, users.username, users.email, users.created_at
+    FROM sessions JOIN users ON users.id = sessions.user_id
+    WHERE sessions.token_hash = ? AND sessions.expires_at > ?`).get(tokenHash, Math.floor(Date.now() / 1000));
+  return row || null;
+}
+async function issueSession(user, req, res) {
+  const previousToken = readSessionToken(req);
+  if (previousToken) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(crypto.createHash('sha256').update(previousToken).digest('hex'));
+  const token = crypto.randomBytes(32).toString('base64url');
+  const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+  const expiresAt = Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS;
+  db.prepare('INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(tokenHash, user.id, expiresAt);
+  db.prepare('DELETE FROM sessions WHERE expires_at <= ?').run(Math.floor(Date.now() / 1000));
+  res.setHeader('Set-Cookie', sessionCookie(token, req));
+}
+async function hashPassword(password) {
+  const salt = crypto.randomBytes(16);
+  const derived = await scrypt(password, salt, 64, SCRYPT_OPTIONS);
+  return `scrypt$16384$8$1$${salt.toString('hex')}$${derived.toString('hex')}`;
+}
+async function verifyPassword(password, encoded) {
+  const [scheme, cost, blockSize, parallel, saltHex, hashHex] = String(encoded || '').split('$');
+  if (scheme !== 'scrypt' || cost !== '16384' || blockSize !== '8' || parallel !== '1' || !/^[a-f0-9]{32}$/.test(saltHex || '') || !/^[a-f0-9]{128}$/.test(hashHex || '')) return false;
+  const expected = Buffer.from(hashHex, 'hex');
+  const actual = await scrypt(password, Buffer.from(saltHex, 'hex'), expected.length, SCRYPT_OPTIONS);
+  return crypto.timingSafeEqual(actual, expected);
+}
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, AUDIO_DIR),
@@ -111,6 +177,66 @@ const upload = multer({
 });
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, app: 'TuneOS', version: '1.0.0', database: 'sqlite' }));
+
+app.get('/api/auth/session', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const user = findSessionUser(req);
+  if (!user && readSessionToken(req)) clearSessionCookie(req, res);
+  res.json({ user: user ? publicUser(user) : null });
+});
+app.post('/api/auth/register', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireSameOrigin(req, res)) return;
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const username = typeof body.username === 'string' ? body.username.trim() : '';
+  const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+  const password = typeof body.password === 'string' ? body.password : '';
+  if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) return res.status(400).json({ error: 'Username must be 3–24 characters using letters, numbers, or underscores.' });
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+  if (password.length < 10 || password.length > 128) return res.status(400).json({ error: 'Password must be between 10 and 128 characters.' });
+  const duplicate = db.prepare('SELECT username, email FROM users WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE').get(username, email);
+  if (duplicate) return res.status(409).json({ error: duplicate.username.toLowerCase() === username.toLowerCase() ? 'That username is already registered.' : 'That email address is already registered.' });
+
+  const passwordHash = await hashPassword(password);
+  let user;
+  try {
+    const result = db.prepare('INSERT INTO users (user_id, username, email, password_hash) VALUES (?, ?, ?, ?)')
+      .run(crypto.randomUUID(), username, email, passwordHash);
+    user = db.prepare('SELECT id, user_id, username, email, created_at FROM users WHERE id = ?').get(Number(result.lastInsertRowid));
+  } catch (error) {
+    if (String(error.message).includes('users.username')) return res.status(409).json({ error: 'That username is already registered.' });
+    if (String(error.message).includes('users.email')) return res.status(409).json({ error: 'That email address is already registered.' });
+    throw error;
+  }
+  await issueSession(user, req, res);
+  log('account', 'A new TuneOS account was registered.');
+  res.status(201).json({ user: publicUser(user) });
+});
+app.post('/api/auth/login', async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireSameOrigin(req, res)) return;
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const identifier = typeof body.identifier === 'string' ? body.identifier.trim() : '';
+  const password = typeof body.password === 'string' ? body.password : '';
+  if (!identifier || identifier.length > 254 || !password || password.length > 128) return res.status(400).json({ error: 'Enter your username or email and password.' });
+  const user = db.prepare(`SELECT id, user_id, username, email, password_hash, created_at FROM users
+    WHERE username = ? COLLATE NOCASE OR email = ? COLLATE NOCASE`).get(identifier, identifier.toLowerCase());
+  if (!user || !(await verifyPassword(password, user.password_hash))) return res.status(401).json({ error: 'Incorrect username/email or password.' });
+  await issueSession(user, req, res);
+  log('account', 'A TuneOS account signed in.');
+  res.json({ user: publicUser(user) });
+});
+app.post('/api/auth/logout', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  if (!requireSameOrigin(req, res)) return;
+  const token = readSessionToken(req);
+  if (token) {
+    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(crypto.createHash('sha256').update(token).digest('hex'));
+    log('account', 'A TuneOS account signed out.');
+  }
+  clearSessionCookie(req, res);
+  res.json({ ok: true });
+});
 
 app.get('/api/tracks', (req, res) => {
   const search = `%${String(req.query.search || '').slice(0, 100)}%`;
