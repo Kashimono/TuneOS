@@ -1978,3 +1978,119 @@ body.theme-light option {
   background:#f4f6fa;
   color:#263449;
 }
+
+/* Paired faders stay usable in the existing four-deck footer. */
+.crossfader-pairs {
+  display:flex;
+  flex:1 1 360px;
+  min-width:0;
+  gap:12px;
+}
+.crossfader-pairs .crossfader {
+  min-width:0;
+}
+.crossfader output {
+  min-width:30px;
+  text-align:right;
+  color:var(--muted);
+}
+@media (max-width: 760px) {
+  .mix-footer.paired-crossfaders {
+    flex-wrap:wrap;
+  }
+  .mix-footer.paired-crossfaders .crossfader-pairs {
+    flex-basis:100%;
+    order:3;
+  }
+}
+
+/* Give Light Mode surfaces enough separation for long sessions. */
+body.theme-light {
+  --bg:#e1e6ed;
+  --bg2:#d8dfe8;
+  --panel:#e9edf2;
+  --panel2:#f2f4f7;
+  --line:rgba(35,50,72,.17);
+  --line-strong:rgba(35,50,72,.26);
+  --text:#243146;
+  --muted:#526178;
+  --faint:#6b788c;
+  --shadow:0 20px 55px rgba(35,50,75,.18);
+}
+body.theme-light .desktop {
+  background:radial-gradient(ellipse at 65% 40%, #d5dde8, transparent 46%),linear-gradient(130deg,#dce2ea,#e7ebf0);
+}
+body.theme-light .topbar,
+body.theme-light .shortcut-rail {
+  background:rgba(230,235,242,.98);
+}
+body.theme-light .app-window,
+body.theme-light .window-titlebar,
+body.theme-light .overlay-card,
+body.theme-light .dock {
+  background:rgba(241,244,248,.98);
+}
+body.theme-light .deck,
+body.theme-light .surface-card,
+body.theme-light .timeline-card,
+body.theme-light .studio-inspector,
+body.theme-light .stat-card,
+body.theme-light .file-item {
+  background:#eef1f5;
+}
+body.theme-light .deck {
+  background:linear-gradient(145deg,#f2f4f7,#e3e8ef);
+}
+body.theme-light .data-table th {
+  color:#43536b;
+  background:#dce3ec;
+}
+body.theme-light .data-table td {
+  color:#2e3d52;
+}
+body.theme-light .data-table tr:hover td {
+  background:#e0e6ee;
+}
+body.theme-light .tag,
+body.theme-light .pill {
+  color:#43536b;
+  background:#e2e7ee;
+}
+body.theme-light .text-input,
+body.theme-light .number-input,
+body.theme-light .select-input,
+body.theme-light .text-area,
+body.theme-light .search-input,
+body.theme-light .search-box,
+body.theme-light .select-control {
+  background:#f4f6f8;
+  border-color:#b5bfcc;
+}
+body.theme-light input::placeholder,
+body.theme-light textarea::placeholder {
+  color:#68778d;
+}
+body.theme-light .small-button,
+body.theme-light .round-control {
+  background:#e1e7ee;
+  border-color:#bbc6d3;
+}
+body.theme-light .small-button:hover,
+body.theme-light .round-control:hover {
+  background:#d4dde7;
+}
+body.theme-light .meter {
+  background:#c4cedb;
+}
+body.theme-light .timeline-card {
+  background:#edf1f5;
+}
+body.theme-light .timeline-track-label {
+  background:#e2e7ee;
+}
+body.theme-light .file-drop {
+  background:#e9edf2;
+}
+body.theme-light .crossfader output {
+  color:var(--muted);
+}

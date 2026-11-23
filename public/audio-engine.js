@@ -8,7 +8,7 @@
       this.mediaSources = new WeakMap();
       this.previewTimers = new Map();
       this.media = new Map();
-      this.crossfade = 0.5;
+      this.crossfades = { AB: 0.5, CD: 0.5 };
     }
     async ensure() {
       if (!this.context) {
@@ -25,7 +25,10 @@
         const gain = this.context.createGain();
         const fade = this.context.createGain();
         gain.gain.value = deck === 'A' ? 0.82 : 0.76;
-        fade.gain.value = deck === 'A' ? 1 - this.crossfade : this.crossfade;
+        const pair = deck === 'A' || deck === 'B' ? 'AB' : 'CD';
+        const isLeftDeck = deck === 'A' || deck === 'C';
+        const crossfade = this.crossfades[pair];
+        fade.gain.value = isLeftDeck ? 1 - crossfade : crossfade;
         gain.connect(fade).connect(this.master);
         this.deckNodes.set(deck, { gain, fade });
       }
@@ -91,38 +94,21 @@
       if (media) media.playbackRate = Math.max(0.5, Math.min(1.5, 1 + Number(pitch) / 100));
     }
 
-    setCrossfade(value) {
-    this.crossfade = Number(value);
+    setCrossfade(pair, value) {
+      const pairKey = String(pair).toUpperCase();
+      if (!(pairKey in this.crossfades)) return;
+      const crossfade = Math.max(0, Math.min(1, Number(value)));
+      if (!Number.isFinite(crossfade)) return;
+      this.crossfades[pairKey] = crossfade;
+      if (!this.context) return;
 
-    if (!this.context) return;
-
-    const leftGain = 1 - this.crossfade;
-    const rightGain = this.crossfade;
-
-    ['A', 'C'].forEach((deck) => {
-        const fade = this.deckNodes.get(deck)?.fade;
-
-        if (fade) {
-            fade.gain.setTargetAtTime(
-                leftGain,
-                this.context.currentTime,
-                0.025
-            );
-        }
-    });
-
-    ['B', 'D'].forEach((deck) => {
-        const fade = this.deckNodes.get(deck)?.fade;
-
-        if (fade) {
-            fade.gain.setTargetAtTime(
-                rightGain,
-                this.context.currentTime,
-                0.025
-            );
-        }
-    });
-}
+      const decks = pairKey === 'AB' ? ['A', 'B'] : ['C', 'D'];
+      const [leftDeck, rightDeck] = decks;
+      const leftFade = this.deckNodes.get(leftDeck)?.fade;
+      const rightFade = this.deckNodes.get(rightDeck)?.fade;
+      if (leftFade) leftFade.gain.setTargetAtTime(1 - crossfade, this.context.currentTime, 0.025);
+      if (rightFade) rightFade.gain.setTargetAtTime(crossfade, this.context.currentTime, 0.025);
+    }
     async recordMicrophone(seconds = 12) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const chunks = [];

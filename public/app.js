@@ -23,7 +23,7 @@
     tracks: [], projects: [], settings: { theme: 'dark', shortcuts: true }, windows: new Map(), z: 10, activeApp: null,
     user: null, profileMode: 'login', profileMessage: '', selectedDeck: 'A',
     deckCount: 2, decks: { A: { trackId: 1, playing: false, volume: 0.82, pitch: 0 }, B: { trackId: 5, playing: false, volume: 0.76, pitch: 0 }, C: { trackId: 6, playing: false, volume: 0.76, pitch: 0 }, D: { trackId: 7, playing: false, volume: 0.76, pitch: 0 } },
-    master: 0.8, crossfade: 0.5, libraryGenre: 'All', librarySearch: '', studio: { id: null, name: 'Untitled Audio Project', clips: [], effects: { Reverb: true, Delay: false, Equalizer: true }, recording: false, playing: false, undo: [], redo: [] }, metrics: null, schedulerMode: 'FCFS'
+    master: 0.8, crossfades: { AB: 0.5, CD: 0.5 }, libraryGenre: 'All', librarySearch: '', studio: { id: null, name: 'Untitled Audio Project', clips: [], effects: { Reverb: true, Delay: false, Equalizer: true }, recording: false, playing: false, undo: [], redo: [] }, metrics: null, schedulerMode: 'FCFS'
   };
   const audio = new window.TuneAudioEngine();
   const windowsEl = $('#windows');
@@ -190,8 +190,11 @@
   function renderDj() {
     const deckIds = ['A', 'B', ...(state.deckCount === 4 ? ['C', 'D'] : [])];
     if (!deckIds.includes(state.selectedDeck)) state.selectedDeck = 'A';
-    const fadeLabels = state.deckCount === 4 ? ['A / C', 'B / D'] : ['A', 'B'];
-    return `<div class="app-view dj-view"><div class="view-header"><div><span class="eyebrow">DJ WORKSPACE</span><h2>DJ Studio</h2><p>Load tracks, shape the blend, and save your mix.</p></div><div class="view-actions"><label class="pill"><input type="radio" name="deck-count" value="2" ${state.deckCount === 2 ? 'checked' : ''} data-action="deck-count"> 2 decks</label><label class="pill"><input type="radio" name="deck-count" value="4" ${state.deckCount === 4 ? 'checked' : ''} data-action="deck-count"> 4 decks</label><button class="small-button" data-action="import-audio">＋ Import</button><button class="small-button primary" data-action="save-mix">Save mix</button></div></div><div class="toolbar"><span class="pill active">● Audio engine ready</span><span class="muted">Preview mode synthesizes a short beat for demo tracks. Imported audio plays from local storage.</span></div><div class="deck-grid ${state.deckCount === 4 ? 'four' : ''}">${deckIds.map(renderDeck).join('')}</div><div class="mix-footer"><strong>MASTER</strong><div class="slider-line" style="flex:0 0 130px;margin:0"><input type="range" min="0" max="100" value="${Math.round(state.master * 100)}" data-action="master"><output>${Math.round(state.master * 100)}%</output></div><div class="crossfader"><span>${fadeLabels[0]}</span><input type="range" min="0" max="100" value="${Math.round(state.crossfade * 100)}" data-action="crossfade" aria-label="Crossfade between ${fadeLabels.join(' and ')}"><span>${fadeLabels[1]}</span></div><button class="small-button icon" data-action="stop-all">Stop all</button></div><div class="deck-library"><div class="view-header"><div><span class="eyebrow">TRACK CRATE</span><h2 style="font-size:13px">Library tracks</h2><p>Select a deck, then click a song once to load it.</p></div><div class="view-actions"><label class="muted" for="track-target-deck">Load into</label><select id="track-target-deck" class="select-control" data-action="target-deck">${deckIds.map((id) => `<option value="${id}" ${state.selectedDeck === id ? 'selected' : ''}>Deck ${id}</option>`).join('')}</select><span class="muted">${state.tracks.length} tracks</span></div></div>${renderTrackTable(state.tracks.slice(0, 8), 'dj')}</div></div>`;
+    const crossfader = (pair, leftDeck, rightDeck) => `<div class="crossfader"><span>${leftDeck}</span><input type="range" min="0" max="100" value="${Math.round(state.crossfades[pair] * 100)}" data-action="crossfade" data-crossfade-pair="${pair}" aria-label="Crossfade between Deck ${leftDeck} and Deck ${rightDeck}"><output>${Math.round(state.crossfades[pair] * 100)}%</output><span>${rightDeck}</span></div>`;
+    const crossfaders = state.deckCount === 4
+      ? `<div class="crossfader-pairs">${crossfader('AB', 'A', 'B')}${crossfader('CD', 'C', 'D')}</div>`
+      : crossfader('AB', 'A', 'B');
+    return `<div class="app-view dj-view"><div class="view-header"><div><span class="eyebrow">DJ WORKSPACE</span><h2>DJ Studio</h2><p>Load tracks, shape the blend, and save your mix.</p></div><div class="view-actions"><label class="pill"><input type="radio" name="deck-count" value="2" ${state.deckCount === 2 ? 'checked' : ''} data-action="deck-count"> 2 decks</label><label class="pill"><input type="radio" name="deck-count" value="4" ${state.deckCount === 4 ? 'checked' : ''} data-action="deck-count"> 4 decks</label><button class="small-button" data-action="import-audio">＋ Import</button><button class="small-button primary" data-action="save-mix">Save mix</button></div></div><div class="toolbar"><span class="pill active">● Audio engine ready</span><span class="muted">Preview mode synthesizes a short beat for demo tracks. Imported audio plays from local storage.</span></div><div class="deck-grid ${state.deckCount === 4 ? 'four' : ''}">${deckIds.map(renderDeck).join('')}</div><div class="mix-footer ${state.deckCount === 4 ? 'paired-crossfaders' : ''}"><strong>MASTER</strong><div class="slider-line" style="flex:0 0 130px;margin:0"><input type="range" min="0" max="100" value="${Math.round(state.master * 100)}" data-action="master"><output>${Math.round(state.master * 100)}%</output></div>${crossfaders}<button class="small-button icon" data-action="stop-all">Stop all</button></div><div class="deck-library"><div class="view-header"><div><span class="eyebrow">TRACK CRATE</span><h2 style="font-size:13px">Library tracks</h2><p>Select a deck, then click a song once to load it.</p></div><div class="view-actions"><label class="muted" for="track-target-deck">Load into</label><select id="track-target-deck" class="select-control" data-action="target-deck">${deckIds.map((id) => `<option value="${id}" ${state.selectedDeck === id ? 'selected' : ''}>Deck ${id}</option>`).join('')}</select><span class="muted">${state.tracks.length} tracks</span></div></div>${renderTrackTable(state.tracks.slice(0, 8), 'dj')}</div></div>`;
   }
   function renderDeck(id) {
     const deck = state.decks[id]; const track = trackById(deck.trackId) || state.tracks[0];
@@ -398,7 +401,7 @@
     if (action === 'load-track') { if (!trackById(trackId)) return; state.decks[deckId].trackId = trackId; state.decks[deckId].playing = false; audio.stop(deckId); openApp('dj'); refreshApp('dj'); toast(`Loaded ${trackById(trackId).title} on Deck ${deckId}.`); return; }
     if (action === 'save-mix') {
       const name = prompt('Name this mix:', 'Untitled DJ Mix'); if (!name) return;
-      const saved = await api('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, kind: 'mix', data: { decks: state.decks, deckCount: state.deckCount, crossfade: state.crossfade, master: state.master } }) });
+      const saved = await api('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, kind: 'mix', data: { decks: state.decks, deckCount: state.deckCount, crossfades: state.crossfades, crossfade: state.crossfades.AB, master: state.master } }) });
       state.projects.unshift(saved); toast(`Saved “${name}”.`); log(`Saved mix ${name}`, 'project'); return;
     }
     if (action === 'library-search') { state.librarySearch = el.value; const win = state.windows.get('library'); $$('.data-table tbody tr', win).forEach((row) => { row.hidden = !row.dataset.search.includes(state.librarySearch.toLowerCase()); }); return; }
@@ -468,7 +471,7 @@
     if (el.matches('[data-action="target-deck"]')) { state.selectedDeck = el.value; refreshApp('dj'); return; }
     if (el.matches('[data-action="scheduler-mode"]')) { state.schedulerMode = el.value; refreshApp('scheduler'); return; }
     if (el.matches('[data-action="master"]')) { state.master = Number(el.value) / 100; audio.setMaster(state.master).catch(() => {}); return; }
-    if (el.matches('[data-action="crossfade"]')) { state.crossfade = Number(el.value) / 100; audio.setCrossfade(state.crossfade); return; }
+    if (el.matches('[data-action="crossfade"]')) { const pair = el.dataset.crossfadePair; state.crossfades[pair] = Number(el.value) / 100; audio.setCrossfade(pair, state.crossfades[pair]); return; }
     if (el.matches('[data-action="deck-volume"]')) { const deck = el.dataset.deck; state.decks[deck].volume = Number(el.value) / 100; audio.setVolume(deck, state.decks[deck].volume).catch(() => {}); return; }
     if (el.matches('[data-action="deck-pitch"]')) { const deck = el.dataset.deck; state.decks[deck].pitch = Number(el.value); audio.setPitch(deck, state.decks[deck].pitch); return; }
     if (el.matches('[data-form="firewall"]')) {
@@ -489,7 +492,7 @@
       if (el.dataset.action === 'master') { state.master = Number(el.value) / 100; audio.setMaster(state.master).catch(() => {}); }
       if (el.dataset.action === 'deck-volume') { state.decks[el.dataset.deck].volume = Number(el.value) / 100; audio.setVolume(el.dataset.deck, state.decks[el.dataset.deck].volume).catch(() => {}); }
       if (el.dataset.action === 'deck-pitch') { state.decks[el.dataset.deck].pitch = Number(el.value); audio.setPitch(el.dataset.deck, el.value); }
-      if (el.dataset.action === 'crossfade') { state.crossfade = Number(el.value) / 100; audio.setCrossfade(state.crossfade); }
+      if (el.dataset.action === 'crossfade') { const pair = el.dataset.crossfadePair; state.crossfades[pair] = Number(el.value) / 100; audio.setCrossfade(pair, state.crossfades[pair]); }
     }
   });
   document.addEventListener('submit', async (event) => {
