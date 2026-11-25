@@ -69,6 +69,17 @@ CREATE TABLE IF NOT EXISTS firewall_rules (
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS managed_ufw_rules (
+  id TEXT PRIMARY KEY,
+  action TEXT NOT NULL CHECK (action IN ('allow','deny')),
+  protocol TEXT NOT NULL CHECK (protocol IN ('tcp','udp')),
+  port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
+  source TEXT NOT NULL,
+  tag TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','active')),
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS activity_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   level TEXT NOT NULL DEFAULT 'info',

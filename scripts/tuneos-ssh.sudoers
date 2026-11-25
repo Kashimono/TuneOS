@@ -1,0 +1,2 @@
+# Separate, read-only SSH status permission. Install as root:root mode 0440 only after approval.
+devantuneos ALL=(root) NOPASSWD: /usr/local/sbin/tuneos-ssh status

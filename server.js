@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const net = require('node:net');
 const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const { promisify } = require('node:util');
@@ -12,7 +13,7 @@ const { execFile } = require('node:child_process');
 
 const ROOT = __dirname;
 const PUBLIC = path.join(ROOT, 'public');
-const DATA_DIR = path.join(ROOT, 'database');
+const DATA_DIR = path.resolve(process.env.TUNEOS_DATA_DIR || path.join(ROOT, 'database'));
 const AUDIO_DIR = path.join(ROOT, 'storage', 'audio');
 for (const dir of [DATA_DIR, AUDIO_DIR]) fs.mkdirSync(dir, { recursive: true });
 
@@ -40,24 +41,52 @@ const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const SCRYPT_OPTIONS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 
 const FIREWALL_WRAPPER_PATH = '/usr/local/sbin/tuneos-firewall';
+const SSH_WRAPPER_PATH = '/usr/local/sbin/tuneos-ssh';
+const SUDO_PATH = '/usr/bin/sudo';
 
-function getUfwStatus() {
+function runHelperCommand(command, args) {
   return new Promise((resolve, reject) => {
     execFile(
-      'sudo',
-      ['-n', FIREWALL_WRAPPER_PATH, 'status'],
+      command,
+      args,
       { timeout: 5000, maxBuffer: 1024 * 1024 },
       (error, stdout, stderr) => {
         if (error) {
-          return reject(new Error(stderr.trim() || error.message || 'Firewall status command failed.'));
+          return reject(new Error(stderr.trim() || error.message || 'Restricted system helper command failed.'));
         }
 
-        const status = stdout.trim();
-        if (!status) return reject(new Error('Firewall status wrapper returned no output.'));
-        resolve(status);
+        const output = stdout.trim();
+        if (!output) return reject(new Error('Restricted system helper returned no output.'));
+        resolve(output);
       }
     );
   });
+}
+function runRestrictedHelper(helperPath, args) { return runHelperCommand(SUDO_PATH, ['-n', helperPath, ...args]); }
+function getUfwStatus() { return runRestrictedHelper(FIREWALL_WRAPPER_PATH, ['status']); }
+function parseSshStatus(output) {
+  const values = Object.fromEntries(output.split(/\r?\n/).map((line) => {
+    const separator = line.indexOf('=');
+    return separator > 0 ? [line.slice(0, separator), line.slice(separator + 1)] : ['', ''];
+  }).filter(([key]) => key));
+  const required = ['service', 'configured_ports', 'listening_ports', 'password_authentication', 'public_key_authentication', 'permit_root_login'];
+  if (required.some((key) => !values[key])) throw new Error('SSH status helper returned incomplete configuration data.');
+  return {
+    service: values.service,
+    configuredPorts: values.configured_ports === 'none' ? [] : values.configured_ports.split(',').map(Number).filter(Number.isInteger),
+    listeningPorts: values.listening_ports === 'none' ? [] : values.listening_ports.split(',').map(Number).filter(Number.isInteger),
+    passwordAuthentication: values.password_authentication,
+    publicKeyAuthentication: values.public_key_authentication,
+    permitRootLogin: values.permit_root_login
+  };
+}
+function isOsAdmin(user) {
+  const configuredId = String(process.env.TUNEOS_OS_ADMIN_ID || '').trim();
+  return Boolean(configuredId && user?.user_id === configuredId);
+}
+function requireOsAdmin(req, res, next) {
+  if (!isOsAdmin(req.user)) return res.status(403).json({ error: 'This operation is limited to the configured TuneOS OS administrator. Set TUNEOS_OS_ADMIN_ID to that account’s user ID on the server.' });
+  next();
 }
 
 const app = express();
@@ -332,24 +361,115 @@ app.put('/api/settings/:key', (req, res) => {
   res.json({ key, value: parseJson(value, value) });
 });
 
-app.get('/api/system/metrics', (_req, res) => {
+function readCpuTimes() {
+  const cpus = os.cpus();
+  return cpus.reduce((totals, cpu) => {
+    for (const [name, value] of Object.entries(cpu.times)) totals[name] += value;
+    return totals;
+  }, { user: 0, nice: 0, sys: 0, idle: 0, irq: 0 });
+}
+
+async function readCpuUsagePercent() {
+  const before = readCpuTimes();
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const after = readCpuTimes();
+  const beforeTotal = Object.values(before).reduce((sum, value) => sum + value, 0);
+  const afterTotal = Object.values(after).reduce((sum, value) => sum + value, 0);
+  const elapsed = afterTotal - beforeTotal;
+  if (elapsed <= 0) return null;
+  return Math.round((1 - ((after.idle - before.idle) / elapsed)) * 1000) / 10;
+}
+
+function readDiskMetrics() {
+  try {
+    const stats = fs.statfsSync(DATA_DIR);
+    const blockSize = Number(stats.bsize || stats.frsize);
+    const total = blockSize * Number(stats.blocks);
+    const free = blockSize * Number(stats.bavail);
+    return { path: DATA_DIR, total, free, used: Math.max(0, total - blockSize * Number(stats.bfree)) };
+  } catch (error) {
+    return { path: DATA_DIR, error: error.message };
+  }
+}
+
+function listLinuxProcesses(limit = 100) {
+  if (process.platform !== 'linux') return { available: false, processes: [] };
+  const processes = [];
+  let pids;
+  try { pids = fs.readdirSync('/proc').filter((entry) => /^\d+$/.test(entry)).map(Number).sort((a, b) => b - a); }
+  catch { return { available: false, processes: [] }; }
+  const orderedPids = [process.pid, ...pids.filter((pid) => pid !== process.pid)];
+  for (const pid of orderedPids) {
+    try {
+      const name = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
+      const status = fs.readFileSync(`/proc/${pid}/status`, 'utf8');
+      const state = status.match(/^State:\s+(.+)$/m)?.[1]?.trim().split(/\s+/)[0] || 'unknown';
+      const rssKb = Number(status.match(/^VmRSS:\s+(\d+)\s+kB$/m)?.[1] || 0);
+      processes.push({ pid, name: name.slice(0, 120), state, memoryRss: rssKb * 1024 });
+    } catch { /* Processes can exit or be hidden while /proc is read. */ }
+    if (processes.length >= limit) break;
+  }
+  return { available: true, processes };
+}
+
+app.get('/api/system/metrics', async (_req, res) => {
   const total = os.totalmem();
   const free = os.freemem();
   res.json({
     hostname: os.hostname(), platform: process.platform, release: os.release(), architecture: process.arch,
     node: process.version, uptimeSeconds: Math.round(os.uptime()), processUptimeSeconds: Math.round(process.uptime()),
     memoryTotal: total, memoryFree: free, memoryUsed: total - free,
+    processMemoryRss: process.memoryUsage().rss,
+    cpuUsagePercent: await readCpuUsagePercent(),
+    disk: readDiskMetrics(),
     loadAverage: os.loadavg(), cpus: os.cpus().length, wsl: Boolean(process.env.WSL_DISTRO_NAME || process.env.WSL_INTEROP)
   });
 });
+app.get('/api/system/processes', (_req, res) => res.json({ ...listLinuxProcesses(), serverPid: process.pid }));
 app.get('/api/firewall/status', async (_req, res) => {
   try {
     const status = await getUfwStatus();
-    res.json({ status });
+    res.json({ status, canManage: false, readOnly: true });
   } catch (error) {
     log('firewall', `UFW status request failed: ${error.message}`, 'warning');
     res.status(503).json({ error: 'Unable to retrieve UFW status through the configured wrapper.', detail: error.message });
   }
+});
+app.get('/api/firewall/actual/rules', async (_req, res) => {
+  try {
+    const output = await runRestrictedHelper(FIREWALL_WRAPPER_PATH, ['list']);
+    const managedRules = db.prepare('SELECT id, action, protocol, port, source, tag, state, created_at FROM managed_ufw_rules ORDER BY created_at DESC').all();
+    res.json({ output, managedRules, canManage: false, readOnly: true });
+  } catch (error) {
+    log('firewall', `UFW rule listing request failed: ${error.message}`, 'warning');
+    res.status(503).json({ error: 'Unable to list actual UFW rules through the configured wrapper.', detail: error.message });
+  }
+});
+function validFirewallSource(value) {
+  if (value === 'any') return true;
+  if (typeof value !== 'string' || value.length > 64) return false;
+  const parts = value.split('/');
+  if (parts.length > 2) return false;
+  const family = net.isIP(parts[0]);
+  if (!family) return false;
+  if (parts.length === 1) return true;
+  if (!/^\d{1,3}$/.test(parts[1])) return false;
+  const prefix = Number(parts[1]);
+  return prefix >= 0 && prefix <= (family === 4 ? 32 : 128);
+}
+app.post('/api/firewall/actual/rules', requireOsAdmin, async (req, res) => {
+  const action = req.body.action === 'deny' ? 'deny' : req.body.action === 'allow' ? 'allow' : '';
+  const protocol = req.body.protocol === 'udp' ? 'udp' : req.body.protocol === 'tcp' ? 'tcp' : '';
+  const port = Number(req.body.port);
+  const source = req.body.source === undefined || req.body.source === '' ? 'any' : req.body.source;
+  if (!action || !protocol || !Number.isInteger(port) || port < 1 || port > 65535 || !validFirewallSource(source)) {
+    return res.status(400).json({ error: 'Choose allow/deny, TCP/UDP, a port from 1 to 65535, and any or a valid IP/CIDR source.' });
+  }
+  if ([22, 3030].includes(port)) return res.status(400).json({ error: 'TuneOS cannot add new rules for protected SSH port 22 or TuneOS port 3030.' });
+  return res.status(501).json({ error: 'Firewall rule changes are disabled in this presentation build. UFW is read-only.' });
+});
+app.delete('/api/firewall/actual/rules/:id', requireOsAdmin, async (req, res) => {
+  return res.status(501).json({ error: 'Firewall rule changes are disabled in this presentation build. UFW is read-only.' });
 });
 app.get('/api/firewall', (_req, res) => res.json({ simulated: true, allowlist: allowedIps, rules: db.prepare('SELECT * FROM firewall_rules ORDER BY id DESC').all() }));
 app.post('/api/firewall/rules', (req, res) => {
@@ -367,6 +487,21 @@ app.patch('/api/firewall/rules/:id', (req, res) => {
   res.json(db.prepare('SELECT * FROM firewall_rules WHERE id = ?').get(id) || null);
 });
 app.delete('/api/firewall/rules/:id', (req, res) => { db.prepare('DELETE FROM firewall_rules WHERE id = ?').run(Number(req.params.id)); res.status(204).end(); });
+app.get('/api/ssh/status', async (req, res) => {
+  try {
+    const output = await runRestrictedHelper(SSH_WRAPPER_PATH, ['status']);
+    res.json({ ...parseSshStatus(output), canManage: false, readOnly: true });
+  } catch (error) {
+    log('ssh', `SSH status request failed: ${error.message}`, 'warning');
+    res.status(503).json({ error: 'Unable to retrieve SSH configuration through the restricted TuneOS helper.', detail: error.message });
+  }
+});
+app.post('/api/ssh/password-authentication', requireOsAdmin, async (req, res) => {
+  const enabled = req.body.enabled;
+  if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be true or false.' });
+  if (!enabled && req.body.confirmKeyAccess !== true) return res.status(400).json({ error: 'Confirm that the existing administrator key login is available before disabling password authentication.' });
+  return res.status(501).json({ error: 'SSH configuration changes are disabled in this presentation build. SSH is read-only.' });
+});
 app.get('/api/activity', (_req, res) => res.json(db.prepare('SELECT * FROM activity_logs ORDER BY id DESC LIMIT 100').all()));
 app.post('/api/activity', (req, res) => {
   const message = String(req.body.message || '').slice(0, 300);

@@ -1,0 +1,38 @@
+#!/bin/bash
+set -euo pipefail
+
+readonly SYSTEMCTL=/usr/bin/systemctl
+readonly SSHD=/usr/sbin/sshd
+readonly SS=/usr/bin/ss
+readonly AWK=/usr/bin/awk
+readonly SORT=/usr/bin/sort
+readonly PASTE=/usr/bin/paste
+
+fail() { printf 'tuneos-ssh: %s\n' "$1" >&2; exit 2; }
+
+status() {
+  local effective service configured listening password_auth public_key root_login
+  effective=$("$SSHD" -T 2>/dev/null) || fail 'sshd could not evaluate its effective configuration'
+  service=$("$SYSTEMCTL" is-active ssh.service 2>/dev/null || true)
+  [[ -n "$service" ]] || service=unknown
+  configured=$(printf '%s\n' "$effective" | "$AWK" '$1 == "port" { print $2 }' | "$PASTE" -sd, -)
+  [[ -n "$configured" ]] || configured=none
+  listening=$("$SS" -ltnH 2>/dev/null | "$AWK" -v ports=",$configured," '{ address=$4; sub(/^.*:/, "", address); if (index(ports, "," address ",") > 0) print address }' | "$SORT" -nu | "$PASTE" -sd, -)
+  [[ -n "$listening" ]] || listening=none
+  password_auth=$(printf '%s\n' "$effective" | "$AWK" '$1 == "passwordauthentication" { print $2; exit }')
+  public_key=$(printf '%s\n' "$effective" | "$AWK" '$1 == "pubkeyauthentication" { print $2; exit }')
+  root_login=$(printf '%s\n' "$effective" | "$AWK" '$1 == "permitrootlogin" { print $2; exit }')
+  [[ -n "$password_auth" && -n "$public_key" && -n "$root_login" ]] || fail 'sshd did not return all required authentication settings'
+  printf 'service=%s\nconfigured_ports=%s\nlistening_ports=%s\npassword_authentication=%s\npublic_key_authentication=%s\npermit_root_login=%s\n' \
+    "$service" "$configured" "$listening" "$password_auth" "$public_key" "$root_login"
+}
+
+case "${1:-}" in
+  status)
+    (( $# == 1 )) || fail 'status takes no additional arguments'
+    status
+    ;;
+  *)
+    fail 'supported operation is status; SSH configuration changes are disabled'
+    ;;
+esac
