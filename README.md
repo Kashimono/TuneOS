@@ -2,44 +2,11 @@
 
 TuneOS is a local desktop-style DJ and audio workspace recreated from the connected Figma Make preview. The app is built with plain HTML, CSS, and browser JavaScript, plus Node.js, Express, and SQLite. It contains no React, Next.js, Vite, or Payload dependencies.
 
-## Start on Ubuntu 22.04 in WSL
+## Run on the Ubuntu Server VM
 
-1. Install VS Code for Windows and its Microsoft WSL extension. If Ubuntu 22.04 is not installed, run this in PowerShell and finish the first-run setup:
+The project is developed on Windows and runs from `~/TuneOS` on an Ubuntu Server VM in VMware. The package declares Node.js `>=24.15.0`. Node.js `v24.22.3` is installed through NVM and is the VM's NVM default; however, a normal non-login SSH command resolves `/usr/bin/node` (`v22.22.1`) because it does not load NVM. In an interactive shell, run `source ~/.nvm/nvm.sh` and `nvm use 24` before starting TuneOS. If a service manager is used later, configure its `PATH` or Node executable explicitly; no TuneOS systemd service was found during the latest inspection. From the VM project directory, install dependencies and start with `npm install` and `npm start` (or `npm run dev` during development). Do not overwrite an existing `.env` when preparing environment settings.
 
-   ```powershell
-   wsl --install -d Ubuntu-22.04
-   ```
-
-   Microsoft documents this distribution install flow in its [WSL installation guide](https://learn.microsoft.com/en-us/windows/wsl/install).
-2. Open the Ubuntu 22.04 shell. Install `curl`, then install nvm and Node.js 24:
-
-   ```bash
-   sudo apt update
-   sudo apt install -y curl
-   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.41.0/install.sh | bash
-   source ~/.bashrc
-   nvm install 24
-   nvm use 24
-   node --version
-   ```
-
-   The nvm versioned installer and usage follow the [nvm project instructions](https://github.com/nvm-sh/nvm#installing-and-updating). TuneOS uses Node's built-in SQLite module, so keep Node at 24.15 or newer.
-3. Open this project folder from Ubuntu. For this workspace, the Windows path maps to:
-
-   ```bash
-   cd /mnt/c/Users/aronr/.codex/.chatgpt-projects/g-p-6adf4a8144ec819180ec5c6fc437ce73/TuneOS
-   code .
-   ```
-
-4. Install the two server dependencies and start TuneOS:
-
-   ```bash
-   cp .env.example .env
-   npm install
-   npm run dev
-   ```
-
-5. Open [http://localhost:3030](http://localhost:3030) in your Windows browser. WSL normally forwards local Linux services to Windows localhost. If this machine uses a different WSL networking mode, follow Microsoft's [WSL networking guide](https://learn.microsoft.com/en-us/windows/wsl/networking).
+TuneOS defaults to binding `127.0.0.1:3030`, which only accepts local connections. To use it from the Windows host, the server must bind to a VM-reachable address and the app allowlist, Ubuntu firewall, and VMware network must permit only the intended Windows host. Then open `http://<Ubuntu-VM-address>:3030` in Windows. The exact address and allowlist depend on the VM network configuration. Do not expose the demo service to untrusted networks; this setup uses HTTP, not TLS.
 
 TuneOS creates `database/tuneos.sqlite` and `storage/audio/` on first run. The database seeds eight demo tracks and one starter project. Demo tracks do not include playable source recordings; they use an explicitly labeled synthesized beat preview. Imported audio is stored locally and can be played through the browser's Web Audio API.
 
@@ -50,51 +17,41 @@ TuneOS creates `database/tuneos.sqlite` and `storage/audio/` on first run. The d
 - Audio Studio with multitrack lanes, microphone recording (up to 12 seconds per take), import, project save/open, undo/redo for clip edits, and WAV rendering for imported clips.
 - Music Library with genre filters, search, rename/delete, track loading, and recent projects.
 - File Manager for locally imported audio and projects.
-- System Monitor, Process Manager, Memory Manager, CPU Scheduler, Resource Manager, System Information, Firewall Manager, Settings, and Activity Logs. Telemetry comes from the Node host; browser-only and simulated operations are labeled in the UI.
-- Express API and SQLite tables for tracks, project state, playlists, settings, firewall display rules, and activity logs.
+- System Monitor, Process Manager, and Memory Manager read host CPU, RAM, disk, uptime, TuneOS process RSS, and Linux `/proc` process data from the server. Process controls are read-only.
+- CPU Scheduler is an educational FCFS/Round Robin simulation; it does not change Linux scheduling. Browser and application resource panels are TuneOS-side information, not a complete OS resource manager.
+- Firewall Manager reads live UFW status and numbered rules through the restricted helper. The presentation build is read-only: adding and deleting UFW rules are disabled. Existing SQLite firewall records are labeled demonstrations and do not change UFW.
+- SSH Manager reads effective OpenSSH settings and service state through a restricted helper. SSH configuration changes are disabled in the presentation build.
+- Express API and SQLite tables store tracks, project state, playlists, settings, managed UFW rule metadata, and activity logs.
 
 ## API routes
 
 - `GET /api/health`
+- `GET /api/auth/session`, `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`
 - `GET /api/tracks`, `POST /api/tracks/import`, `PATCH /api/tracks/:id`, `DELETE /api/tracks/:id`, `GET /api/audio/:id`
 - `GET /api/projects`, `POST /api/projects`, `PUT /api/projects/:id`, `DELETE /api/projects/:id`
 - `GET /api/settings`, `PUT /api/settings/:key`
-- `GET /api/system/metrics`
-- `GET /api/firewall`, `POST /api/firewall/rules`, `PATCH /api/firewall/rules/:id`, `DELETE /api/firewall/rules/:id`
+- `GET /api/system/metrics`, `GET /api/system/processes`
+- `GET /api/firewall/status`, `GET /api/firewall/actual/rules` (live read-only Ubuntu data; actual rule mutations are disabled in the presentation build)
+- `GET /api/firewall`, `POST /api/firewall/rules`, `PATCH /api/firewall/rules/:id`, `DELETE /api/firewall/rules/:id` (SQLite demo rules)
+- `GET /api/ssh/status` (live read-only Ubuntu data; SSH configuration mutations are disabled in the presentation build)
 - `GET /api/activity`, `POST /api/activity`
 
-## WSL, firewall, and IP allowlisting
+Account records are stored in SQLite's `users` table. Passwords use salted scrypt hashes; session tokens are random, expire after seven days, and are stored hashed in the `sessions` table. The browser cookie is HTTP-only and SameSite strict, and is marked Secure when TuneOS is reached over HTTPS. On the documented plain HTTP setup, the connection itself is not encrypted, so use a unique password and do not expose the app to untrusted networks. Accounts currently identify the user in the interface; existing tracks, projects, and settings remain shared by this local TuneOS instance.
 
-TuneOS binds to `127.0.0.1:3030` by default, so only local requests can connect. The API also rejects non-loopback client addresses unless `ALLOWED_CLIENT_IPS` lists the exact remote address. This is an app-level exact-address allowlist; it does not accept CIDR ranges and does not replace Windows Firewall, Hyper-V Firewall, or UFW.
+## Authentication, firewall, and IP allowlisting
 
-For a trusted LAN test only:
+Health and authentication routes are public; application APIs require a valid unexpired SQLite session. The API also rejects non-loopback client addresses unless `ALLOWED_CLIENT_IPS` lists the exact remote address. This is an app-level exact-address allowlist; it does not accept CIDR ranges and does not replace Windows Firewall or UFW.
 
-1. Determine the client address that the TuneOS server actually sees (WSL NAT, localhost forwarding, and mirrored networking may present different addresses).
-2. In `.env`, set `HOST=0.0.0.0` and set `ALLOWED_CLIENT_IPS` to a comma-separated list of exact trusted addresses, for example `192.168.1.27,192.168.1.28`.
-3. Add matching inbound rules on the relevant firewall, restricted to those client addresses and TCP port 3030. Example Ubuntu UFW rule:
-
-   ```bash
-   sudo ufw allow from 192.168.1.27 to any port 3030 proto tcp
-   sudo ufw status
-   ```
-
-   Example elevated PowerShell rule for the Windows host:
-
-   ```powershell
-   New-NetFirewallRule -DisplayName "TuneOS 3030 from trusted client" -Direction Inbound -Protocol TCP -LocalPort 3030 -RemoteAddress 192.168.1.27 -Action Allow -Profile Private
-   ```
-
-4. Restart TuneOS, then test from the named client. Remove the firewall rule and restore `HOST=127.0.0.1` when LAN access is no longer needed.
-
-WSL2 NAT, mirrored mode, Hyper-V Firewall, and Windows Firewall affect how inbound traffic reaches Linux. Microsoft's [WSL networking guide](https://learn.microsoft.com/en-us/windows/wsl/networking) documents the appropriate forwarding/firewall steps for the installed WSL mode. The TuneOS Firewall Manager only saves simulated rules in SQLite; it never changes OS firewall rules. Do not expose this demo service to an untrusted network: it has no user login or TLS layer.
+To access TuneOS from Windows through VMware, first determine the Windows host address that Ubuntu actually sees. Configure `HOST` and `ALLOWED_CLIENT_IPS` to permit only that address, and verify that the VM network and existing inbound firewall rules allow TCP 3030 from it. Then open `http://<Ubuntu-VM-address>:3030` in Windows. Keep the existing SSH and TuneOS access rules intact. TuneOS does not add or delete UFW rules in the presentation build; status and numbered rule listing are read-only. Existing UFW rules, including ports 22 and 3030, are left untouched.
 
 ## Current limits
 
 - The Figma Make source bundle was recoverable and its original source snapshot contains the project, but that downloaded snapshot predates the latest live preview revision. The current preview was inspected separately; this implementation follows the current desktop shell and app surfaces, while the archive's older UI-specific assets are retained under `public/assets/reference/` rather than misrepresented as current artwork.
 - The original Figma project did not include audio files for its demo songs. Demo playback is synthesized; imported local files play as actual audio.
 - Reverb, delay, and EQ controls are interface foundations and are not yet applied to the rendered WAV. WAV export currently mixes imported clips at their stored timeline positions.
-- Account sign-in, cloud sync, and production-grade multi-user access control are not implemented. The default loopback bind is the intended setup.
-- Firewall manager rules and CPU scheduling are educational UI simulations. They do not control the host OS.
+- Cloud sync and per-user isolation of tracks, projects, and settings are not implemented; those records are shared by this local TuneOS instance.
+- Ubuntu helper installation and sudoers policy are system-level deployment prerequisites. Source code alone does not install or grant permission to run the helpers. The last reported Ubuntu inspection confirmed UFW active and SSH configuration valid. Read-only helper deployment and permissions still need to be verified on the VM before the live panels can be demonstrated.
+- CPU scheduling and SQLite firewall display rules are educational simulations. They do not control the host OS.
 - Browser microphone recording requires microphone permission and a secure browser context. `localhost` is treated as a secure context by modern browsers.
 
 ## Design source and assets

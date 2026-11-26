@@ -1,0 +1,71 @@
+#!/bin/bash
+set -euo pipefail
+
+readonly UFW=/usr/sbin/ufw
+readonly PYTHON=/usr/bin/python3
+
+fail() { printf 'tuneos-firewall: %s\n' "$1" >&2; exit 2; }
+require_root() { (( EUID == 0 )) || fail 'must be run as root through the restricted sudo rule'; }
+valid_port() {
+  [[ "$1" =~ ^[0-9]{1,5}$ ]] || return 1
+  local value=$((10#$1))
+  (( value >= 1 && value <= 65535 ))
+}
+valid_tag() { [[ "$1" =~ ^TuneOS-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; }
+valid_source() {
+  [[ "$1" == any ]] || "$PYTHON" -c 'import ipaddress,sys; ipaddress.ip_network(sys.argv[1], strict=False)' "$1" >/dev/null 2>&1
+}
+protected_port() { [[ "$1" == 22 || "$1" == 3030 ]]; }
+validate_add_args() {
+  (( $# == 5 )) || fail 'add requires action, protocol, port, source, and TuneOS tag'
+  local action=$1 protocol=$2 port=$3 source=$4 tag=$5
+  valid_port "$port" || fail 'port must be an integer from 1 through 65535'
+  protected_port "$((10#$port))" && fail 'TuneOS cannot add rules for protected SSH port 22 or TuneOS port 3030'
+  [[ "$action" == allow || "$action" == deny ]] || fail 'action must be allow or deny'
+  [[ "$protocol" == tcp || "$protocol" == udp ]] || fail 'protocol must be tcp or udp'
+  valid_tag "$tag" || fail 'invalid TuneOS rule tag'
+  valid_source "$source" || fail 'source must be any or a valid IPv4/IPv6 address or CIDR range'
+}
+validate_delete_args() {
+  (( $# == 5 )) || fail 'delete requires action, protocol, port, source, and TuneOS tag'
+  local action=$1 protocol=$2 port=$3 source=$4 tag=$5
+  valid_port "$port" || fail 'port must be an integer from 1 through 65535'
+  protected_port "$((10#$port))" && fail 'TuneOS cannot delete rules for protected SSH port 22 or TuneOS port 3030'
+  [[ "$action" == allow || "$action" == deny ]] || fail 'action must be allow or deny'
+  [[ "$protocol" == tcp || "$protocol" == udp ]] || fail 'protocol must be tcp or udp'
+  valid_tag "$tag" || fail 'invalid TuneOS rule tag'
+  valid_source "$source" || fail 'source must be any or a valid IPv4/IPv6 address or CIDR range'
+}
+
+# Validation-only operations are used by the repository test suite. They never
+# invoke UFW and are intentionally absent from the sudoers policy.
+case "${1:-}" in
+  validate-add)
+    shift
+    validate_add_args "$@"
+    printf 'Rule arguments are valid.\n'
+    exit 0
+    ;;
+  validate-delete)
+    shift
+    validate_delete_args "$@"
+    printf 'Rule arguments are valid.\n'
+    exit 0
+    ;;
+esac
+
+case "${1:-}" in
+  status)
+    require_root
+    (( $# == 1 )) || fail 'status takes no additional arguments'
+    exec "$UFW" status verbose
+    ;;
+  list)
+    require_root
+    (( $# == 1 )) || fail 'list takes no additional arguments'
+    exec "$UFW" status numbered
+    ;;
+  *)
+    fail 'supported operations are status and list; firewall changes are disabled'
+    ;;
+esac

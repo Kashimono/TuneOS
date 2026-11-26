@@ -40,6 +40,23 @@ CREATE TABLE IF NOT EXISTS settings (
   value_json TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id TEXT NOT NULL UNIQUE,
+  username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  email TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  password_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at);
+
 CREATE TABLE IF NOT EXISTS firewall_rules (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -49,6 +66,17 @@ CREATE TABLE IF NOT EXISTS firewall_rules (
   protocol TEXT NOT NULL DEFAULT 'tcp',
   action TEXT NOT NULL DEFAULT 'allow' CHECK (action IN ('allow','block')),
   enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS managed_ufw_rules (
+  id TEXT PRIMARY KEY,
+  action TEXT NOT NULL CHECK (action IN ('allow','deny')),
+  protocol TEXT NOT NULL CHECK (protocol IN ('tcp','udp')),
+  port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
+  source TEXT NOT NULL,
+  tag TEXT NOT NULL UNIQUE,
+  state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','active')),
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

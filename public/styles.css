@@ -1885,3 +1885,230 @@ body.theme-light .desktop:before,
 body.theme-light .desktop:after {
   border-color: rgba(80, 105, 145, .08);
 }
+
+.firewall-output{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.6 var(--mono);color:#c7d3e8}
+.profile-overlay{align-items:center;justify-content:center;padding:16px}
+.profile-card{width:min(420px,100%);max-height:min(620px,90vh);overflow:auto;border-radius:16px;padding:19px}
+.profile-card .popover-title h3{font-size:19px;margin:5px 0 15px}
+.profile-tabs{display:flex;gap:8px;margin:0 0 10px}
+.profile-intro,.profile-hint{color:var(--muted);font-size:10px}
+.profile-form,.profile-card form{display:flex;flex-direction:column;gap:5px}
+.profile-card .form-label{margin:8px 0 2px}
+.profile-submit{width:100%;margin-top:9px}
+.profile-error{min-height:14px;color:#c34e60;font-size:10px;margin:4px 0}
+.profile-summary{display:flex;align-items:center;gap:12px;padding:10px 0 14px;border-bottom:1px solid var(--line)}
+.profile-summary strong,.profile-summary small{display:block}
+.profile-summary strong{font-size:14px}
+.profile-summary small{margin-top:4px;color:var(--muted);font-size:10px}
+.profile-avatar-large{display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:#dce4f1;color:#33445e;font-weight:700;font-size:16px}
+.profile-card .setting-line span{max-width:60%;overflow-wrap:anywhere;text-align:right;color:var(--text);font-size:10px}
+.track-selectable{cursor:pointer}
+.track-selectable.selected td{background:rgba(126,111,224,.16);color:var(--text)}
+.track-selectable:focus-visible td{outline:2px solid var(--cyan);outline-offset:-2px}
+body.theme-light .icon-button,
+body.theme-light .text-button,
+body.theme-light .search-result,
+body.theme-light .search-result small,
+body.theme-light .notification-item p {
+  color:var(--text);
+}
+body.theme-light .icon-button:hover,
+body.theme-light .search-result:hover {
+  background:#e7edf5;
+}
+body.theme-light .avatar-button {
+  background:#dce4ef;
+  color:#33445e;
+  border:1px solid #c7d1df;
+}
+body.theme-light .status-pill {
+  color:#43536b;
+  background:#e8edf4;
+  border-color:#cbd4e0;
+}
+body.theme-light .window-actions button {
+  color:#53627a;
+}
+body.theme-light .window-actions .close-window:hover {
+  background:#f8dfe4;
+  color:#9f3449;
+}
+body.theme-light .system-badge {
+  color:#76501b;
+  background:#f5ead5;
+  border:1px solid #e9d6b4;
+}
+body.theme-light .shortcut-icon.cyan,
+body.theme-light .dock-glyph.cyan {
+  color:#087c75!important;
+  background:#d6efec!important;
+}
+body.theme-light .shortcut-icon.blue,
+body.theme-light .dock-glyph.blue {
+  color:#315f9d!important;
+  background:#dce8fa!important;
+}
+body.theme-light .shortcut-icon.amber,
+body.theme-light .dock-glyph.amber {
+  color:#875517!important;
+  background:#f4e7d2!important;
+}
+body.theme-light .shortcut-icon.green,
+body.theme-light .dock-glyph.green {
+  color:#287346!important;
+  background:#dcefe3!important;
+}
+body.theme-light .shortcut-icon.slate,
+body.theme-light .dock-glyph.slate {
+  color:#4c5a70!important;
+  background:#e3e8ef!important;
+}
+body.theme-light .profile-avatar-large {
+  background:#dce4ef;
+  color:#33445e;
+}
+body.theme-light .profile-error {
+  color:#a72e43;
+}
+body.theme-light .track-selectable.selected td {
+  background:#ded8f4;
+  color:#263449;
+}
+body.theme-light option {
+  background:#f4f6fa;
+  color:#263449;
+}
+
+/* Hold the desktop behind the existing account form until a session is verified. */
+body.auth-pending #desktop {
+  visibility:hidden;
+}
+body.auth-required #desktop > :not(#profile) {
+  visibility:hidden;
+  pointer-events:none;
+}
+body.auth-required #profile {
+  display:flex;
+  visibility:visible;
+  z-index:1000;
+  background:rgba(5,9,17,.88);
+}
+body.auth-required #profile [data-close-overlay] {
+  display:none;
+}
+
+/* Paired faders stay usable in the existing four-deck footer. */
+.crossfader-pairs {
+  display:flex;
+  flex:1 1 360px;
+  min-width:0;
+  gap:12px;
+}
+.crossfader-pairs .crossfader {
+  min-width:0;
+}
+.crossfader output {
+  min-width:30px;
+  text-align:right;
+  color:var(--muted);
+}
+@media (max-width: 760px) {
+  .mix-footer.paired-crossfaders {
+    flex-wrap:wrap;
+  }
+  .mix-footer.paired-crossfaders .crossfader-pairs {
+    flex-basis:100%;
+    order:3;
+  }
+}
+
+/* Give Light Mode surfaces enough separation for long sessions. */
+body.theme-light {
+  --bg:#e1e6ed;
+  --bg2:#d8dfe8;
+  --panel:#e9edf2;
+  --panel2:#f2f4f7;
+  --line:rgba(35,50,72,.17);
+  --line-strong:rgba(35,50,72,.26);
+  --text:#243146;
+  --muted:#526178;
+  --faint:#6b788c;
+  --shadow:0 20px 55px rgba(35,50,75,.18);
+}
+body.theme-light .desktop {
+  background:radial-gradient(ellipse at 65% 40%, #d5dde8, transparent 46%),linear-gradient(130deg,#dce2ea,#e7ebf0);
+}
+body.theme-light .topbar,
+body.theme-light .shortcut-rail {
+  background:rgba(230,235,242,.98);
+}
+body.theme-light .app-window,
+body.theme-light .window-titlebar,
+body.theme-light .overlay-card,
+body.theme-light .dock {
+  background:rgba(241,244,248,.98);
+}
+body.theme-light .deck,
+body.theme-light .surface-card,
+body.theme-light .timeline-card,
+body.theme-light .studio-inspector,
+body.theme-light .stat-card,
+body.theme-light .file-item {
+  background:#eef1f5;
+}
+body.theme-light .deck {
+  background:linear-gradient(145deg,#f2f4f7,#e3e8ef);
+}
+body.theme-light .data-table th {
+  color:#43536b;
+  background:#dce3ec;
+}
+body.theme-light .data-table td {
+  color:#2e3d52;
+}
+body.theme-light .data-table tr:hover td {
+  background:#e0e6ee;
+}
+body.theme-light .tag,
+body.theme-light .pill {
+  color:#43536b;
+  background:#e2e7ee;
+}
+body.theme-light .text-input,
+body.theme-light .number-input,
+body.theme-light .select-input,
+body.theme-light .text-area,
+body.theme-light .search-input,
+body.theme-light .search-box,
+body.theme-light .select-control {
+  background:#f4f6f8;
+  border-color:#b5bfcc;
+}
+body.theme-light input::placeholder,
+body.theme-light textarea::placeholder {
+  color:#68778d;
+}
+body.theme-light .small-button,
+body.theme-light .round-control {
+  background:#e1e7ee;
+  border-color:#bbc6d3;
+}
+body.theme-light .small-button:hover,
+body.theme-light .round-control:hover {
+  background:#d4dde7;
+}
+body.theme-light .meter {
+  background:#c4cedb;
+}
+body.theme-light .timeline-card {
+  background:#edf1f5;
+}
+body.theme-light .timeline-track-label {
+  background:#e2e7ee;
+}
+body.theme-light .file-drop {
+  background:#e9edf2;
+}
+body.theme-light .crossfader output {
+  color:var(--muted);
+}

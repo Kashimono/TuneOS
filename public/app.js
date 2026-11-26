@@ -9,11 +9,12 @@
     ['library', 'Music Library', '▤', 'blue', 'Browse tracks and saved projects'],
     ['files', 'File Manager', '▰', 'amber', 'Manage local audio and project files'],
     ['monitor', 'System Monitor', '◴', 'green', 'View live host resource telemetry'],
-    ['process', 'Process Manager', '▤', 'blue', 'Inspect local workspace processes'],
+    ['process', 'Process Manager', '▤', 'blue', 'Inspect Ubuntu host processes'],
     ['memory', 'Memory Manager', '▥', 'cyan', 'Review host memory use'],
     ['scheduler', 'CPU Scheduler', '◷', 'amber', 'Explore scheduling simulations'],
     ['resources', 'Resource Manager', '◉', 'green', 'Inspect browser and app resources'],
-    ['firewall', 'Firewall Manager', '⬡', 'red', 'Edit simulated local firewall rules'],
+    ['firewall', 'Firewall Manager', '⬡', 'red', 'Read and manage Ubuntu UFW rules'],
+    ['ssh', 'SSH Manager', '⇄', 'blue', 'Inspect and configure the Ubuntu SSH service'],
     ['system', 'System Information', '⌘', 'slate', 'Host and runtime details'],
     ['activity', 'Activity Logs', '≋', 'blue', 'Review recent desktop activity'],
     ['settings', 'Settings', '⚙', 'slate', 'Personalize your workspace']
@@ -21,17 +22,23 @@
   const APPS = Object.fromEntries(APP_LIST.map((item) => [item[0], { id: item[0], name: item[1], icon: item[2], tone: item[3], description: item[4] }]));
   const state = {
     tracks: [], projects: [], settings: { theme: 'dark', shortcuts: true }, windows: new Map(), z: 10, activeApp: null,
+    user: null, profileMode: 'login', profileMessage: '', selectedDeck: 'A',
     deckCount: 2, decks: { A: { trackId: 1, playing: false, volume: 0.82, pitch: 0 }, B: { trackId: 5, playing: false, volume: 0.76, pitch: 0 }, C: { trackId: 6, playing: false, volume: 0.76, pitch: 0 }, D: { trackId: 7, playing: false, volume: 0.76, pitch: 0 } },
-    master: 0.8, crossfade: 0.5, libraryGenre: 'All', librarySearch: '', studio: { id: null, name: 'Untitled Audio Project', clips: [], effects: { Reverb: true, Delay: false, Equalizer: true }, recording: false, playing: false, undo: [], redo: [] }, metrics: null, schedulerMode: 'FCFS'
+    master: 0.8, crossfades: { AB: 0.5, CD: 0.5 }, libraryGenre: 'All', librarySearch: '', studio: { id: null, name: 'Untitled Audio Project', clips: [], effects: { Reverb: true, Delay: false, Equalizer: true }, recording: false, playing: false, undo: [], redo: [] }, metrics: null, schedulerMode: 'FCFS'
   };
   const audio = new window.TuneAudioEngine();
   const windowsEl = $('#windows');
 
   async function api(url, options = {}) {
-    const response = await fetch(url, options);
+    const response = await fetch(url, { credentials: 'same-origin', ...options });
     if (response.status === 204) return null;
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || `Request failed (${response.status}).`);
+    if (!response.ok) {
+      if (response.status === 401 && !url.startsWith('/api/auth/')) lockToLogin('Your TuneOS session has expired. Please sign in again.');
+      const error = new Error(data.error || `Request failed (${response.status}).`);
+      error.status = response.status;
+      throw error;
+    }
     return data;
   }
   function toast(message, tone = '') {
@@ -41,9 +48,42 @@
   function log(message, category = 'desktop', level = 'info') {
     api('/api/activity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category, level, message }) }).catch(() => {});
   }
+  function updateProfileButton() {
+    const button = $('#profile-avatar');
+    if (!button) return;
+    button.textContent = state.user ? state.user.username.slice(0, 1).toUpperCase() : 'M';
+    button.title = state.user ? `Signed in as ${state.user.username}` : 'Open account profile';
+    button.setAttribute('aria-label', state.user ? `Open profile for ${state.user.username}` : 'Open account profile');
+  }
+  function lockToLogin(message = '') {
+    state.user = null;
+    state.profileMode = 'login';
+    state.profileMessage = message;
+    for (const deck of ['A', 'B', 'C', 'D', 'studio']) audio.stop(deck);
+    state.decks.A.playing = state.decks.B.playing = state.decks.C.playing = state.decks.D.playing = false;
+    state.studio.playing = false;
+    for (const id of [...state.windows.keys()]) closeApp(id);
+    document.body.classList.remove('auth-pending');
+    document.body.classList.add('auth-required');
+    const profile = $('#profile');
+    if (profile) profile.hidden = false;
+    updateProfileButton();
+    renderProfile();
+  }
+  function unlockWorkspace() {
+    document.body.classList.remove('auth-pending', 'auth-required');
+    $('#profile').hidden = true;
+    updateProfileButton();
+  }
   function duration(seconds) {
     const value = Math.max(0, Number(seconds) || 0);
     return `${Math.floor(value / 60)}:${String(Math.floor(value % 60)).padStart(2, '0')}`;
+  }
+  function formatBytes(bytes) {
+    const value = Math.max(0, Number(bytes) || 0);
+    if (value >= 1073741824) return `${(value / 1073741824).toFixed(2)} GB`;
+    if (value >= 1048576) return `${(value / 1048576).toFixed(1)} MB`;
+    return `${(value / 1024).toFixed(0)} KB`;
   }
   function colorFor(track) { return track?.color || '#69d9d2'; }
   function trackById(id) { return state.tracks.find((track) => Number(track.id) === Number(id)); }
@@ -64,10 +104,12 @@
     Object.assign(state.settings, settings);
     document.body.classList.toggle('theme-light', state.settings.theme === 'light');
     document.documentElement.style.colorScheme = state.settings.theme === 'light' ? 'light' : 'dark';
+    $('meta[name="theme-color"]').content = state.settings.theme === 'light' ? '#e9edf4' : '#080d19';
   }
 
   function iconMarkup(app) { return `<span class="window-app-icon ${app.tone}">${app.icon}</span>`; }
   function openApp(id) {
+    if (!state.user) return;
     hideOverlays();
     if (id === 'launcher') { showOverlay('launcher'); return; }
     if (!APPS[id]) return;
@@ -88,6 +130,8 @@
     if (id === 'monitor' || id === 'memory' || id === 'system') refreshMetrics();
     if (id === 'activity') refreshActivity();
     if (id === 'firewall') refreshFirewall();
+    if (id === 'ssh') refreshSsh();
+    if (id === 'process') refreshProcesses();
     if (id === 'library') refreshProjects();
     if (id === 'files') refreshProjects();
     log(`Opened ${app.name}`);
@@ -110,10 +154,15 @@
     const win = state.windows.get(id); if (win) $('.window-content', win).innerHTML = appView(id);
   }
   function showOverlay(id) {
+    if (!state.user && id !== 'profile') return;
     hideOverlays(); const el = $(`#${id}`); if (el) { el.hidden = false; if (id === 'launcher') $('#launcher-search').focus(); if (id === 'search') $('#global-search').focus(); }
     if (id === 'notifications') refreshNotifications();
+    if (id === 'profile') renderProfile();
   }
-  function hideOverlays() { $$('.overlay').forEach((item) => { item.hidden = true; }); }
+  function hideOverlays() {
+    if (document.body.classList.contains('auth-required')) return;
+    $$('.overlay').forEach((item) => { item.hidden = true; });
+  }
   function updateClock() {
     const now = new Date(); const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const day = now.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -143,6 +192,25 @@
     } catch { /* Desktop still works offline. */ }
   }
 
+  function renderProfile() {
+    const target = $('#profile-content'); if (!target) return;
+    if (state.user) {
+      const created = state.user.createdAt ? new Date(`${state.user.createdAt.replace(' ', 'T')}Z`).toLocaleDateString() : '—';
+      target.innerHTML = `<div class="profile-summary"><span class="profile-avatar-large">${esc(state.user.username.slice(0, 1).toUpperCase())}</span><div><strong>${esc(state.user.username)}</strong><small>Signed in to this TuneOS instance</small></div></div><div class="setting-line"><div><strong>Username</strong></div><span>${esc(state.user.username)}</span></div><div class="setting-line"><div><strong>Email</strong></div><span>${esc(state.user.email)}</span></div><div class="setting-line"><div><strong>Account created</strong></div><span>${esc(created)}</span></div><p id="profile-error" class="profile-error" role="status"></p><button class="small-button danger profile-submit" data-action="logout">Log out</button>`;
+      return;
+    }
+    const registering = state.profileMode === 'register';
+    target.innerHTML = `<div class="profile-tabs"><button class="pill ${!registering ? 'active' : ''}" data-action="profile-mode" data-mode="login">Login</button><button class="pill ${registering ? 'active' : ''}" data-action="profile-mode" data-mode="register">Create Account</button></div><p class="profile-intro">${registering ? 'Create a local TuneOS account.' : 'Log in to your TuneOS account.'}</p><form data-form="account" data-mode="${registering ? 'register' : 'login'}"><label class="form-label" for="account-identifier">${registering ? 'Username' : 'Username or email'}</label><input id="account-identifier" class="text-input" name="${registering ? 'username' : 'identifier'}" autocomplete="username" minlength="${registering ? '3' : '1'}" maxlength="${registering ? '24' : '254'}" ${registering ? 'pattern="[A-Za-z0-9_]{3,24}"' : ''} required>${registering ? '<label class="form-label" for="account-email">Email</label><input id="account-email" class="text-input" type="email" name="email" autocomplete="email" maxlength="254" required>' : ''}<label class="form-label" for="account-password">Password</label><input id="account-password" class="text-input" type="password" name="password" autocomplete="${registering ? 'new-password' : 'current-password'}" minlength="${registering ? '10' : '1'}" maxlength="128" required><p class="profile-hint">${registering ? 'Use 10–128 characters. Choose a unique password.' : 'Passwords are stored as salted scrypt hashes.'}</p><p id="profile-error" class="profile-error" role="alert">${esc(state.profileMessage)}</p><button class="small-button primary profile-submit" type="submit">${registering ? 'Create Account' : 'Login'}</button></form>`;
+  }
+
+  async function refreshProfile() {
+    try {
+      const data = await api('/api/auth/session');
+      if (!data.user) lockToLogin('Your TuneOS session has expired. Please sign in again.');
+      else { state.user = data.user; updateProfileButton(); }
+    } catch { /* A transient check failure does not discard a still-valid local session. */ }
+  }
+
   function appView(id) {
     if (id === 'dj') return renderDj();
     if (id === 'studio') return renderStudio();
@@ -155,13 +223,19 @@
     if (id === 'scheduler') return renderScheduler();
     if (id === 'resources') return renderResources();
     if (id === 'firewall') return renderFirewall();
+    if (id === 'ssh') return renderSsh();
     if (id === 'system') return renderSystem();
     if (id === 'activity') return renderActivity();
     return '<p class="empty-state">This app is not available.</p>';
   }
   function renderDj() {
     const deckIds = ['A', 'B', ...(state.deckCount === 4 ? ['C', 'D'] : [])];
-    return `<div class="app-view dj-view"><div class="view-header"><div><span class="eyebrow">DJ WORKSPACE</span><h2>DJ Studio</h2><p>Load tracks, shape the blend, and save your mix.</p></div><div class="view-actions"><label class="pill"><input type="radio" name="deck-count" value="2" ${state.deckCount === 2 ? 'checked' : ''} data-action="deck-count"> 2 decks</label><label class="pill"><input type="radio" name="deck-count" value="4" ${state.deckCount === 4 ? 'checked' : ''} data-action="deck-count"> 4 decks</label><button class="small-button" data-action="import-audio">＋ Import</button><button class="small-button primary" data-action="save-mix">Save mix</button></div></div><div class="toolbar"><span class="pill active">● Audio engine ready</span><span class="muted">Preview mode synthesizes a short beat for demo tracks. Imported audio plays from local storage.</span></div><div class="deck-grid ${state.deckCount === 4 ? 'four' : ''}">${deckIds.map(renderDeck).join('')}</div><div class="mix-footer"><strong>MASTER</strong><div class="slider-line" style="flex:0 0 130px;margin:0"><input type="range" min="0" max="100" value="${Math.round(state.master * 100)}" data-action="master"><output>${Math.round(state.master * 100)}%</output></div><div class="crossfader"><span>A</span><input type="range" min="0" max="100" value="${Math.round(state.crossfade * 100)}" data-action="crossfade"><span>B</span></div><button class="small-button icon" data-action="stop-all">Stop all</button></div><div class="deck-library"><div class="view-header"><div><span class="eyebrow">TRACK CRATE</span><h2 style="font-size:13px">Library tracks</h2></div><span class="muted">${state.tracks.length} tracks</span></div>${renderTrackTable(state.tracks.slice(0, 8), 'dj')}</div></div>`;
+    if (!deckIds.includes(state.selectedDeck)) state.selectedDeck = 'A';
+    const crossfader = (pair, leftDeck, rightDeck) => `<div class="crossfader"><span>${leftDeck}</span><input type="range" min="0" max="100" value="${Math.round(state.crossfades[pair] * 100)}" data-action="crossfade" data-crossfade-pair="${pair}" aria-label="Crossfade between Deck ${leftDeck} and Deck ${rightDeck}"><output>${Math.round(state.crossfades[pair] * 100)}%</output><span>${rightDeck}</span></div>`;
+    const crossfaders = state.deckCount === 4
+      ? `<div class="crossfader-pairs">${crossfader('AB', 'A', 'B')}${crossfader('CD', 'C', 'D')}</div>`
+      : crossfader('AB', 'A', 'B');
+    return `<div class="app-view dj-view"><div class="view-header"><div><span class="eyebrow">DJ WORKSPACE</span><h2>DJ Studio</h2><p>Load tracks, shape the blend, and save your mix.</p></div><div class="view-actions"><label class="pill"><input type="radio" name="deck-count" value="2" ${state.deckCount === 2 ? 'checked' : ''} data-action="deck-count"> 2 decks</label><label class="pill"><input type="radio" name="deck-count" value="4" ${state.deckCount === 4 ? 'checked' : ''} data-action="deck-count"> 4 decks</label><button class="small-button" data-action="import-audio">＋ Import</button><button class="small-button primary" data-action="save-mix">Save mix</button></div></div><div class="toolbar"><span class="pill active">● Audio engine ready</span><span class="muted">Preview mode synthesizes a short beat for demo tracks. Imported audio plays from local storage.</span></div><div class="deck-grid ${state.deckCount === 4 ? 'four' : ''}">${deckIds.map(renderDeck).join('')}</div><div class="mix-footer ${state.deckCount === 4 ? 'paired-crossfaders' : ''}"><strong>MASTER</strong><div class="slider-line" style="flex:0 0 130px;margin:0"><input type="range" min="0" max="100" value="${Math.round(state.master * 100)}" data-action="master"><output>${Math.round(state.master * 100)}%</output></div>${crossfaders}<button class="small-button icon" data-action="stop-all">Stop all</button></div><div class="deck-library"><div class="view-header"><div><span class="eyebrow">TRACK CRATE</span><h2 style="font-size:13px">Library tracks</h2><p>Select a deck, then click a song once to load it.</p></div><div class="view-actions"><label class="muted" for="track-target-deck">Load into</label><select id="track-target-deck" class="select-control" data-action="target-deck">${deckIds.map((id) => `<option value="${id}" ${state.selectedDeck === id ? 'selected' : ''}>Deck ${id}</option>`).join('')}</select><span class="muted">${state.tracks.length} tracks</span></div></div>${renderTrackTable(state.tracks.slice(0, 8), 'dj')}</div></div>`;
   }
   function renderDeck(id) {
     const deck = state.decks[id]; const track = trackById(deck.trackId) || state.tracks[0];
@@ -170,7 +244,9 @@
   }
   function renderTrackTable(tracks, context = 'library') {
     if (!tracks.length) return '<div class="empty-state"><strong>No tracks yet</strong>Import a local audio file to add it to your library.</div>';
-    return `<div class="table-wrap"><table class="data-table"><thead><tr><th>TRACK</th><th>GENRE</th><th>BPM</th><th>DURATION</th><th>SOURCE</th><th>ACTIONS</th></tr></thead><tbody>${tracks.map((track) => `<tr data-search="${esc(`${track.title} ${track.artist}`.toLowerCase())}"><td><div class="track-cell"><span class="cover-art" style="background:${colorFor(track)}">♫</span><span><strong>${esc(track.title)}</strong><small>${esc(track.artist)}</small></span></div></td><td><span class="tag">${esc(track.genre)}</span></td><td>${track.bpm || '—'}</td><td class="mono">${duration(track.duration_seconds)}</td><td>${track.source === 'imported' ? 'Imported' : 'Library'}</td><td><div class="view-actions"><button class="small-button icon" data-action="load-track" data-track="${track.id}" data-deck="A" title="Load in DJ Studio">Load</button>${context === 'library' ? `<button class="small-button icon" data-action="rename-track" data-track="${track.id}">Rename</button><button class="small-button icon danger" data-action="delete-track" data-track="${track.id}">Delete</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>`;
+    const selectable = context === 'dj';
+    const targetDeck = selectable ? state.selectedDeck : 'A';
+    return `<div class="table-wrap"><table class="data-table"><thead><tr><th>TRACK</th><th>GENRE</th><th>BPM</th><th>DURATION</th><th>SOURCE</th><th>ACTIONS</th></tr></thead><tbody>${tracks.map((track) => `<tr class="${selectable ? `track-selectable ${Number(state.decks[targetDeck].trackId) === Number(track.id) ? 'selected' : ''}` : ''}" ${selectable ? `data-action="load-track" data-track="${track.id}" data-deck="${targetDeck}" tabindex="0" title="Click once to load on Deck ${targetDeck}"` : ''} data-search="${esc(`${track.title} ${track.artist}`.toLowerCase())}"><td><div class="track-cell"><span class="cover-art" style="background:${colorFor(track)}">♫</span><span><strong>${esc(track.title)}</strong><small>${esc(track.artist)}</small></span></div></td><td><span class="tag">${esc(track.genre)}</span></td><td>${track.bpm || '—'}</td><td class="mono">${duration(track.duration_seconds)}</td><td>${track.source === 'imported' ? 'Imported' : 'Library'}</td><td><div class="view-actions"><button class="small-button icon" data-action="load-track" data-track="${track.id}" data-deck="${targetDeck}" title="Load in Deck ${targetDeck}">Load</button>${context === 'library' ? `<button class="small-button icon" data-action="rename-track" data-track="${track.id}">Rename</button><button class="small-button icon danger" data-action="delete-track" data-track="${track.id}">Delete</button>` : ''}</div></td></tr>`).join('')}</tbody></table></div>`;
   }
 
   function renderLibrary() {
@@ -214,18 +290,21 @@
   function renderMonitor() {
     const m = state.metrics || {};
     const used = m.memoryTotal ? Math.round(m.memoryUsed / m.memoryTotal * 100) : 0;
-    return `<div class="app-view"><div class="view-header"><div><span class="eyebrow">LIVE HOST TELEMETRY</span><h2>System Monitor</h2><p>Metrics reported by the Node.js host process.</p></div><button class="small-button" data-action="refresh-metrics">Refresh</button></div><div class="stat-grid"><div class="stat-card"><small>CPU CORES</small><strong>${m.cpus ?? '—'}</strong><em>${esc(m.architecture || 'Loading host')}</em></div><div class="stat-card"><small>MEMORY USED</small><strong>${used}%</strong><em>${m.memoryTotal ? `${(m.memoryUsed / 1073741824).toFixed(1)} of ${(m.memoryTotal / 1073741824).toFixed(1)} GB` : 'Waiting for API'}</em></div><div class="stat-card"><small>HOST UPTIME</small><strong>${m.uptimeSeconds ? `${Math.floor(m.uptimeSeconds / 3600)}h ${Math.floor(m.uptimeSeconds / 60) % 60}m` : '—'}</strong><em>system uptime</em></div><div class="stat-card"><small>TUNEOS</small><strong>${esc(m.node || '—')}</strong><em>Node.js runtime</em></div></div><div class="two-col"><div class="surface-card"><h3>Memory pressure</h3><div class="bar-row"><span>Used</span><div class="meter"><i style="width:${used}%"></i></div><b>${used}%</b></div><div class="bar-row"><span>Free</span><div class="meter"><i style="width:${100 - used}%"></i></div><b>${100 - used}%</b></div><p class="toast-note">OS memory and load averages are host-level snapshots, not per-app profiling.</p></div><div class="surface-card"><h3>System load</h3><div class="bar-row"><span>1 minute</span><div class="meter"><i style="width:${Math.min(100, (m.loadAverage?.[0] || 0) * 15)}%"></i></div><b>${m.loadAverage?.[0]?.toFixed(2) ?? '—'}</b></div><div class="bar-row"><span>5 minutes</span><div class="meter"><i style="width:${Math.min(100, (m.loadAverage?.[1] || 0) * 15)}%"></i></div><b>${m.loadAverage?.[1]?.toFixed(2) ?? '—'}</b></div></div></div></div>`;
+    const disk = m.disk || {};
+    const diskUsed = disk.total ? Math.round(disk.used / disk.total * 100) : null;
+    return `<div class="app-view"><div class="view-header"><div><span class="eyebrow">LIVE HOST TELEMETRY</span><h2>System Monitor</h2><p>Read-only metrics from the host running TuneOS.</p></div><button class="small-button" data-action="refresh-metrics">Refresh</button></div><div class="stat-grid"><div class="stat-card"><small>CPU USAGE</small><strong>${m.cpuUsagePercent == null ? '—' : `${m.cpuUsagePercent}%`}</strong><em>${m.cpus ?? '—'} logical cores · sampled over 250 ms</em></div><div class="stat-card"><small>MEMORY USED</small><strong>${used}%</strong><em>${m.memoryTotal ? `${formatBytes(m.memoryUsed)} of ${formatBytes(m.memoryTotal)}` : 'Waiting for API'}</em></div><div class="stat-card"><small>DISK USED</small><strong>${diskUsed == null ? '—' : `${diskUsed}%`}</strong><em>${disk.total ? `${formatBytes(disk.used)} of ${formatBytes(disk.total)}` : esc(disk.error || 'Waiting for API')}</em></div><div class="stat-card"><small>HOST UPTIME</small><strong>${m.uptimeSeconds ? `${Math.floor(m.uptimeSeconds / 3600)}h ${Math.floor(m.uptimeSeconds / 60) % 60}m` : '—'}</strong><em>${esc(m.hostname || 'Host')}</em></div></div><div class="two-col"><div class="surface-card"><h3>Memory pressure</h3><div class="bar-row"><span>Used</span><div class="meter"><i style="width:${used}%"></i></div><b>${used}%</b></div><div class="bar-row"><span>Free</span><div class="meter"><i style="width:${100 - used}%"></i></div><b>${100 - used}%</b></div><p class="toast-note">System RAM is read from the Node.js host. Per-process RSS is shown in Memory Manager.</p></div><div class="surface-card"><h3>System load averages</h3><div class="bar-row"><span>1 minute</span><div class="meter"><i style="width:${Math.min(100, (m.loadAverage?.[0] || 0) * 15)}%"></i></div><b>${m.loadAverage?.[0]?.toFixed(2) ?? '—'}</b></div><div class="bar-row"><span>5 minutes</span><div class="meter"><i style="width:${Math.min(100, (m.loadAverage?.[1] || 0) * 15)}%"></i></div><b>${m.loadAverage?.[1]?.toFixed(2) ?? '—'}</b></div></div></div></div>`;
   }
   function renderProcess() {
     const items = [...state.windows.keys()].map((id) => ({ name: APPS[id].name, type: 'Desktop app', status: 'Active' }));
     items.push({ name: 'Express local API', type: 'Node.js', status: 'Running' }, { name: 'SQLite database', type: 'Local data', status: 'Ready' });
-    return `<div class="app-view"><div class="view-header"><div><span class="eyebrow">WORKSPACE PROCESSES</span><h2>Process Manager</h2><p>Applications and services active in this TuneOS session.</p></div><span class="pill active">${items.length} ACTIVE</span></div><div class="toolbar"><span class="muted">Process control is limited to TuneOS windows.</span></div><div class="table-wrap"><table class="data-table"><thead><tr><th>NAME</th><th>TYPE</th><th>STATUS</th><th>ACTION</th></tr></thead><tbody>${items.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(item.type)}</td><td><span class="good-label">● ${esc(item.status)}</span></td><td><span class="muted">Managed</span></td></tr>`).join('')}</tbody></table></div><div class="toast-note">Host system services are visible only as platform telemetry; this app cannot terminate OS processes.</div></div>`;
+    return `<div class="app-view"><div class="view-header"><div><span class="eyebrow">UBUNTU HOST PROCESSES</span><h2>Process Manager</h2><p>Read-only process names, states, and resident memory from Linux /proc.</p></div><button class="small-button" data-action="refresh-processes">Refresh</button></div><div id="host-processes" class="surface-card"><p class="muted">Loading host processes…</p></div><div class="deck-library"><h3>TuneOS workspace processes</h3><div class="table-wrap"><table class="data-table"><thead><tr><th>NAME</th><th>TYPE</th><th>STATUS</th></tr></thead><tbody>${items.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(item.type)}</td><td>${esc(item.status)}</td></tr>`).join('')}</tbody></table></div></div><div class="toast-note">Host process controls are intentionally unavailable; this panel cannot terminate Ubuntu processes.</div></div>`;
   }
   function renderMemory() {
     const m = state.metrics || {}; const used = m.memoryTotal ? Math.round(m.memoryUsed / m.memoryTotal * 100) : 0;
-    return `<div class="app-view"><div class="view-header"><div><span class="eyebrow">HOST MEMORY</span><h2>Memory Manager</h2><p>Read-only memory information from Node.js.</p></div><button class="small-button" data-action="refresh-metrics">Refresh</button></div><div class="surface-card"><div class="view-header"><div><h2 style="font-size:13px">System memory</h2><p>${m.memoryTotal ? `${(m.memoryUsed / 1073741824).toFixed(2)} GB used of ${(m.memoryTotal / 1073741824).toFixed(2)} GB` : 'Loading telemetry…'}</p></div><strong>${used}%</strong></div><div class="meter" style="height:10px"><i style="width:${used}%"></i></div><div class="bar-row"><span>Available</span><div class="meter"><i style="width:${100 - used}%"></i></div><b>${100 - used}%</b></div></div><div class="surface-card" style="margin-top:12px"><h3>TuneOS process</h3><div class="bar-row"><span>RSS</span><div class="meter"><i style="width:${Math.min(100, Math.round((processMemoryEstimate() / Math.max(1, m.memoryTotal || 1)) * 100))}%"></i></div><b>browser</b></div><p class="toast-note">Browser memory is not exposed precisely to a normal web page; per-tab footprint is estimated by your browser.</p></div></div>`;
+    const processRss = m.processMemoryRss || 0;
+    const disk = m.disk || {};
+    return `<div class="app-view"><div class="view-header"><div><span class="eyebrow">HOST MEMORY AND STORAGE</span><h2>Memory Manager</h2><p>Read-only memory and filesystem information from the TuneOS host.</p></div><button class="small-button" data-action="refresh-metrics">Refresh</button></div><div class="surface-card"><div class="view-header"><div><h2 style="font-size:13px">System memory</h2><p>${m.memoryTotal ? `${formatBytes(m.memoryUsed)} used of ${formatBytes(m.memoryTotal)}` : 'Loading telemetry…'}</p></div><strong>${used}%</strong></div><div class="meter" style="height:10px"><i style="width:${used}%"></i></div><div class="bar-row"><span>Available</span><div class="meter"><i style="width:${100 - used}%"></i></div><b>${100 - used}%</b></div></div><div class="surface-card" style="margin-top:12px"><h3>TuneOS server process</h3><div class="bar-row"><span>Resident memory (RSS)</span><div class="meter"><i style="width:${Math.min(100, Math.round(processRss / Math.max(1, m.memoryTotal || 1) * 100))}%"></i></div><b>${processRss ? formatBytes(processRss) : '—'}</b></div><p class="toast-note">RSS is read from the Node.js process running TuneOS, not estimated browser memory.</p></div><div class="surface-card" style="margin-top:12px"><h3>Filesystem containing TuneOS data</h3><p>${disk.total ? `${formatBytes(disk.used)} used · ${formatBytes(disk.free)} available · ${formatBytes(disk.total)} total` : esc(disk.error || 'Disk information unavailable.')}</p><small class="muted">${esc(disk.path || '')}</small></div></div>`;
   }
-  function processMemoryEstimate() { return 0; }
   function renderScheduler() {
     const jobs = [{ name: 'Audio playback buffer', burst: 4 }, { name: 'Waveform render', burst: 7 }, { name: 'Library indexing', burst: 3 }, { name: 'Project autosave', burst: 2 }];
     let clock = 0; let schedule = [];
@@ -241,7 +320,10 @@
     return `<div class="app-view"><div class="view-header"><div><span class="eyebrow">RESOURCE OVERVIEW</span><h2>Resource Manager</h2><p>Browser, local service, and host resources.</p></div><button class="small-button" data-action="refresh-metrics">Refresh</button></div><div class="stat-grid"><div class="stat-card"><small>WINDOWS OPEN</small><strong>${state.windows.size}</strong><em>desktop views</em></div><div class="stat-card"><small>TRACKS</small><strong>${state.tracks.length}</strong><em>SQLite catalog</em></div><div class="stat-card"><small>PROJECTS</small><strong>${state.projects.length}</strong><em>SQLite records</em></div><div class="stat-card"><small>SERVER UPTIME</small><strong>${m.processUptimeSeconds ? `${Math.floor(m.processUptimeSeconds / 60)}m` : '—'}</strong><em>Node process</em></div></div><div class="surface-card"><h3>Resource providers</h3><div class="setting-line"><div><strong>Web Audio</strong><small>Browser audio graph and imported file playback</small></div><span class="pill">On demand</span></div><div class="setting-line"><div><strong>SQLite</strong><small>Local metadata and project records</small></div><span class="pill">Ready</span></div><div class="setting-line"><div><strong>Host memory</strong><small>System-level values from the Node.js host</small></div><span class="pill">${m.memoryTotal ? 'Available' : 'Loading'}</span></div></div></div>`;
   }
   function renderFirewall() {
-    return `<div class="app-view"><div class="view-header"><div><span class="eyebrow">SIMULATED POLICY DESK</span><h2>Firewall Manager</h2><p>These rules are saved in SQLite for UI demonstration only.</p></div><span class="system-badge">OS FIREWALL UNCHANGED</span></div><div class="surface-card"><h3>Add a display rule</h3><form data-form="firewall" class="form-row"><input class="text-input" name="name" placeholder="Rule name" style="flex:1;min-width:120px"><input class="text-input" name="address" placeholder="IP address / CIDR" required style="flex:1;min-width:120px"><input class="number-input" name="port" placeholder="Port"><select class="select-control" name="action"><option value="allow">Allow</option><option value="block">Block</option></select><button class="small-button primary">Add rule</button></form></div><div id="firewall-rules" class="surface-card" style="margin-top:12px"><p class="muted">Loading local rules…</p></div><div class="toast-note">Actual network access is controlled by HOST, ALLOWED_CLIENT_IPS, Windows Firewall, and UFW. See README before opening this server to a LAN.</div></div>`;
+    return `<div class="app-view"><div class="view-header"><div><span class="eyebrow">UBUNTU UFW</span><h2>Firewall Manager</h2><p>Actual status and rules come from the restricted UFW helper.</p></div><button class="small-button" data-action="refresh-firewall">Refresh</button></div><div id="firewall-status" class="surface-card"><p class="muted">Loading UFW status…</p></div><div class="surface-card" style="margin-top:12px"><h3>Actual UFW rules</h3><p class="muted">Presentation mode is read-only. Firewall rule addition and deletion are disabled.</p><form id="ufw-admin-controls" data-form="ufw-rule" class="form-row" hidden><select class="select-control" name="action"><option value="allow">Allow</option><option value="deny">Deny</option></select><select class="select-control" name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select><input class="number-input" name="port" type="number" min="1" max="65535" placeholder="Port" required><input class="text-input" name="source" placeholder="Source IP/CIDR or any" value="any" required><button class="small-button primary">Add actual rule</button></form><div id="ufw-actual-list"><p class="muted">Loading actual UFW rules…</p></div></div><div class="surface-card" style="margin-top:12px"><h3>Saved display rules</h3><p class="muted">These existing SQLite demo records do not change UFW.</p><form data-form="firewall" class="form-row"><input class="text-input" name="name" placeholder="Rule name" style="flex:1;min-width:120px"><input class="text-input" name="address" placeholder="IP address / CIDR" required style="flex:1;min-width:120px"><input class="number-input" name="port" placeholder="Port"><select class="select-control" name="action"><option value="allow">Allow</option><option value="block">Block</option></select><button class="small-button primary">Save display rule</button></form><div id="firewall-rules"><p class="muted">Loading local rules…</p></div></div><div class="toast-note">Status and rule listing are read-only in this presentation build.</div></div>`;
+  }
+  function renderSsh() {
+    return `<div class="app-view"><div class="view-header"><div><span class="eyebrow">UBUNTU OPENSSH</span><h2>SSH Manager</h2><p>Read actual service state and effective settings through the restricted TuneOS helper.</p></div><button class="small-button" data-action="refresh-ssh">Refresh</button></div><div id="ssh-status" class="surface-card"><p class="muted">Loading SSH service status…</p></div><form id="ssh-admin-controls" data-form="ssh-password" class="surface-card" style="margin-top:12px" hidden><h3>Password authentication</h3><p class="muted">Key authentication is preserved and the helper validates with <code>sshd -t</code> before reloading SSH.</p><div class="form-row"><label class="muted" for="ssh-password-auth">Password login</label><select id="ssh-password-auth" class="select-control" name="enabled"><option value="false">Disabled</option><option value="true">Enabled</option></select><button class="small-button primary">Apply SSH setting</button></div></form><div class="toast-note">Presentation mode is read-only. TuneOS will not change SSH configuration.</div></div>`;
   }
   function renderSystem() {
     const m = state.metrics || {};
@@ -254,6 +336,16 @@
     catch (error) { toast(`Host metrics unavailable: ${error.message}`); return; }
     for (const id of ['monitor', 'memory', 'system', 'resources']) refreshApp(id);
   }
+  async function refreshProcesses() {
+    const win = state.windows.get('process'); if (!win) return;
+    const target = $('#host-processes', win);
+    try {
+      const data = await api('/api/system/processes');
+      if (!target) return;
+      if (!data.available) { target.innerHTML = '<p class="muted">Host process information is unavailable on this platform.</p>'; return; }
+      target.innerHTML = `<div class="view-header"><div><h3 style="margin:0">Ubuntu processes</h3><p class="muted">${data.processes.length} visible entries · read-only</p></div></div>${data.processes.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>PID</th><th>PROCESS</th><th>STATE</th><th>RESIDENT MEMORY</th></tr></thead><tbody>${data.processes.map((item) => `<tr><td class="mono">${item.pid}</td><td>${esc(item.name)}</td><td>${esc(item.state)}</td><td>${formatBytes(item.memoryRss)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No process entries were readable.</p>'}`;
+    } catch (error) { if (target) target.innerHTML = `<p class="muted">Host process list unavailable: ${esc(error.message)}</p>`; }
+  }
   async function refreshActivity() {
     const win = state.windows.get('activity'); if (!win) return;
     try {
@@ -264,16 +356,50 @@
   }
   async function refreshFirewall() {
     const win = state.windows.get('firewall'); if (!win) return;
+    const statusTarget = $('#firewall-status', win);
+    try {
+      const status = await api('/api/firewall/status');
+      const adminControls = $('#ufw-admin-controls', win);
+      if (adminControls) adminControls.hidden = !status.canManage;
+      if (statusTarget) statusTarget.innerHTML = `<h3>UFW status · retrieved from Ubuntu</h3><pre class="firewall-output">${esc(status.status || '(The wrapper returned no status output.)')}</pre>`;
+    } catch (error) {
+      const adminControls = $('#ufw-admin-controls', win); if (adminControls) adminControls.hidden = true;
+      if (statusTarget) statusTarget.innerHTML = `<h3>UFW status unavailable</h3><p class="muted">${esc(error.message)}</p><p class="muted">Check that the restricted wrapper exists and permits the read-only status operation.</p>`;
+    }
+    try {
+      const actual = await api('/api/firewall/actual/rules');
+      const target = $('#ufw-actual-list', win);
+      if (target) target.innerHTML = `<pre class="firewall-output">${esc(actual.output)}</pre><h4>TuneOS-managed rules</h4>${actual.managedRules.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>POLICY</th><th>SOURCE</th><th>PORT</th><th>STATE</th><th></th></tr></thead><tbody>${actual.managedRules.map((rule) => `<tr><td>${esc(rule.action.toUpperCase())} ${esc(rule.protocol.toUpperCase())}</td><td class="mono">${esc(rule.source)}</td><td>${rule.port}</td><td>${esc(rule.state)}</td><td>${actual.canManage && rule.state === 'active' ? `<button class="small-button icon danger" data-action="delete-ufw-rule" data-rule="${esc(rule.id)}">Delete</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : '<p class="muted">No TuneOS-managed UFW rules are recorded.</p>'}`;
+    } catch (error) {
+      const target = $('#ufw-actual-list', win);
+      if (target) target.innerHTML = `<p class="muted">Actual UFW rules unavailable: ${esc(error.message)}</p>`;
+    }
     try {
       const data = await api('/api/firewall');
       const target = $('#firewall-rules', win);
-      if (target) target.innerHTML = `<div class="view-header"><div><h3 style="margin:0">Saved display rules</h3><p class="muted">Runtime API allowlist: ${data.allowlist.length ? esc(data.allowlist.join(', ')) : 'loopback only'}</p></div><span class="system-badge">SIMULATION ONLY</span></div>${data.rules.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>NAME</th><th>ADDRESS</th><th>PORT</th><th>POLICY</th><th>STATE</th><th></th></tr></thead><tbody>${data.rules.map((rule) => `<tr><td>${esc(rule.name)}</td><td class="mono">${esc(rule.address)}</td><td>${rule.port || 'Any'}</td><td>${esc(rule.action)}</td><td>${rule.enabled ? 'On' : 'Off'}</td><td><button class="small-button icon danger" data-action="delete-rule" data-rule="${rule.id}">Delete</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-state">No simulated rules yet.</div>'}`;
+      if (target) target.innerHTML = `<div class="view-header"><div><h3 style="margin:0">Saved display rules</h3><p class="muted">Runtime API allowlist: ${data.allowlist.length ? esc(data.allowlist.join(', ')) : 'loopback only'}</p></div><span class="system-badge">SQLITE DEMO ONLY</span></div>${data.rules.length ? `<div class="table-wrap"><table class="data-table"><thead><tr><th>NAME</th><th>ADDRESS</th><th>PORT</th><th>POLICY</th><th>STATE</th><th></th></tr></thead><tbody>${data.rules.map((rule) => `<tr><td>${esc(rule.name)}</td><td class="mono">${esc(rule.address)}</td><td>${rule.port || 'Any'}</td><td>${esc(rule.action)}</td><td>${rule.enabled ? 'On' : 'Off'}</td><td><button class="small-button icon danger" data-action="delete-rule" data-rule="${rule.id}">Delete</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-state">No saved display rules.</div>'}`;
     } catch (error) { const target = $('#firewall-rules', win); if (target) target.textContent = error.message; }
+  }
+  async function refreshSsh() {
+    const win = state.windows.get('ssh'); if (!win) return;
+    const target = $('#ssh-status', win);
+    const controls = $('#ssh-admin-controls', win);
+    try {
+      const data = await api('/api/ssh/status');
+      if (controls) controls.hidden = !data.canManage;
+      if (target) target.innerHTML = `<div class="view-header"><div><h3 style="margin:0">SSH service: ${esc(data.service)}</h3><p class="muted">Configured ports: ${esc(data.configuredPorts.join(', ') || 'none')} · Listening ports: ${esc(data.listeningPorts.join(', ') || 'none')}</p></div><span class="system-badge">LIVE UBUNTU VALUES</span></div><div class="setting-line"><div><strong>Password authentication</strong></div><span>${esc(data.passwordAuthentication)}</span></div><div class="setting-line"><div><strong>Public-key authentication</strong></div><span>${esc(data.publicKeyAuthentication)}</span></div><div class="setting-line"><div><strong>Root login</strong></div><span>${esc(data.permitRootLogin)}</span></div>`;
+      const select = $('#ssh-password-auth', win);
+      if (select) select.value = data.passwordAuthentication === 'yes' ? 'true' : 'false';
+    } catch (error) {
+      if (controls) controls.hidden = true;
+      if (target) target.innerHTML = `<h3>SSH status unavailable</h3><p class="muted">${esc(error.message)}</p><p class="muted">The restricted SSH helper must be installed and permitted before TuneOS can report effective settings.</p>`;
+    }
   }
   function updateTheme(theme) {
     state.settings.theme = theme;
     document.body.classList.toggle('theme-light', theme === 'light');
     document.documentElement.style.colorScheme = theme === 'light' ? 'light' : 'dark';
+    $('meta[name="theme-color"]').content = theme === 'light' ? '#e9edf4' : '#080d19';
     api('/api/settings/theme', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: theme }) }).catch(() => {});
     refreshApp('settings');
   }
@@ -343,7 +469,7 @@
     const trackId = Number(el.dataset.track); const deckId = el.dataset.deck || 'A';
     if (action === 'import-audio') return startUpload(el.closest('[data-window]')?.dataset.window || 'library');
     if (action === 'deck-count') { state.deckCount = Number(el.value); refreshApp('dj'); return; }
-    if (action === 'deck-load') { if (el.value) state.decks[deckId].trackId = Number(el.value); state.decks[deckId].playing = false; audio.stop(deckId); refreshApp('dj'); return; }
+    if (action === 'deck-load') { state.selectedDeck = deckId; if (el.value) state.decks[deckId].trackId = Number(el.value); state.decks[deckId].playing = false; audio.stop(deckId); refreshApp('dj'); return; }
     if (action === 'play-deck') {
       const deck = state.decks[deckId]; const track = trackById(deck.trackId);
       if (deck.playing) { audio.stop(deckId); deck.playing = false; }
@@ -358,7 +484,7 @@
     if (action === 'load-track') { if (!trackById(trackId)) return; state.decks[deckId].trackId = trackId; state.decks[deckId].playing = false; audio.stop(deckId); openApp('dj'); refreshApp('dj'); toast(`Loaded ${trackById(trackId).title} on Deck ${deckId}.`); return; }
     if (action === 'save-mix') {
       const name = prompt('Name this mix:', 'Untitled DJ Mix'); if (!name) return;
-      const saved = await api('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, kind: 'mix', data: { decks: state.decks, deckCount: state.deckCount, crossfade: state.crossfade, master: state.master } }) });
+      const saved = await api('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, kind: 'mix', data: { decks: state.decks, deckCount: state.deckCount, crossfades: state.crossfades, crossfade: state.crossfades.AB, master: state.master } }) });
       state.projects.unshift(saved); toast(`Saved “${name}”.`); log(`Saved mix ${name}`, 'project'); return;
     }
     if (action === 'library-search') { state.librarySearch = el.value; const win = state.windows.get('library'); $$('.data-table tbody tr', win).forEach((row) => { row.hidden = !row.dataset.search.includes(state.librarySearch.toLowerCase()); }); return; }
@@ -380,15 +506,24 @@
     if (action === 'undo') { if (state.studio.undo.length) { state.studio.redo.push(JSON.stringify(state.studio.clips)); state.studio.clips = JSON.parse(state.studio.undo.pop()); refreshApp('studio'); } else toast('Nothing to undo.'); return; }
     if (action === 'redo') { if (state.studio.redo.length) { state.studio.undo.push(JSON.stringify(state.studio.clips)); state.studio.clips = JSON.parse(state.studio.redo.pop()); refreshApp('studio'); } else toast('Nothing to redo.'); return; }
     if (action === 'toggle-shortcut') { state.settings.shortcuts = state.settings.shortcuts === false; api('/api/settings/shortcuts', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: state.settings.shortcuts }) }).catch(() => {}); refreshApp('settings'); return; }
+    if (action === 'profile-mode') { state.profileMode = el.dataset.mode === 'register' ? 'register' : 'login'; state.profileMessage = ''; renderProfile(); return; }
+    if (action === 'logout') {
+      await api('/api/auth/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      lockToLogin(); toast('You have been logged out.'); return;
+    }
     if (action === 'settings-tab') { toast(`${el.dataset.tab} preferences are shown in this workspace panel.`); return; }
     if (action === 'refresh-metrics') { await refreshMetrics(); toast('Host metrics refreshed.'); return; }
+    if (action === 'refresh-processes') { await refreshProcesses(); return; }
     if (action === 'refresh-activity') { await refreshActivity(); return; }
+    if (action === 'refresh-firewall') { await refreshFirewall(); return; }
+    if (action === 'refresh-ssh') { await refreshSsh(); return; }
     if (action === 'scheduler-mode') { state.schedulerMode = el.value; refreshApp('scheduler'); return; }
     if (action === 'delete-rule') { await api(`/api/firewall/rules/${el.dataset.rule}`, { method: 'DELETE' }); await refreshFirewall(); toast('Display rule removed.'); return; }
     if (action === 'toggle-rule') { await api(`/api/firewall/rules/${el.dataset.rule}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: el.checked }) }); await refreshFirewall(); return; }
   }
 
   document.addEventListener('click', async (event) => {
+    if (!state.user && !event.target.closest('#profile')) return;
     const winAction = event.target.closest('[data-window-action]');
     if (winAction) {
       const win = winAction.closest('[data-window]'); const action = winAction.dataset.windowAction; const id = win.dataset.window;
@@ -417,9 +552,10 @@
     }
     if (el.matches('[data-action="deck-load"]')) { try { await handleAction('deck-load', el); } catch (error) { toast(error.message); } return; }
     if (el.matches('[data-action="deck-count"]')) { state.deckCount = Number(el.value); refreshApp('dj'); return; }
+    if (el.matches('[data-action="target-deck"]')) { state.selectedDeck = el.value; refreshApp('dj'); return; }
     if (el.matches('[data-action="scheduler-mode"]')) { state.schedulerMode = el.value; refreshApp('scheduler'); return; }
     if (el.matches('[data-action="master"]')) { state.master = Number(el.value) / 100; audio.setMaster(state.master).catch(() => {}); return; }
-    if (el.matches('[data-action="crossfade"]')) { state.crossfade = Number(el.value) / 100; audio.setCrossfade(state.crossfade); return; }
+    if (el.matches('[data-action="crossfade"]')) { const pair = el.dataset.crossfadePair; state.crossfades[pair] = Number(el.value) / 100; audio.setCrossfade(pair, state.crossfades[pair]); return; }
     if (el.matches('[data-action="deck-volume"]')) { const deck = el.dataset.deck; state.decks[deck].volume = Number(el.value) / 100; audio.setVolume(deck, state.decks[deck].volume).catch(() => {}); return; }
     if (el.matches('[data-action="deck-pitch"]')) { const deck = el.dataset.deck; state.decks[deck].pitch = Number(el.value); audio.setPitch(deck, state.decks[deck].pitch); return; }
     if (el.matches('[data-form="firewall"]')) {
@@ -440,10 +576,54 @@
       if (el.dataset.action === 'master') { state.master = Number(el.value) / 100; audio.setMaster(state.master).catch(() => {}); }
       if (el.dataset.action === 'deck-volume') { state.decks[el.dataset.deck].volume = Number(el.value) / 100; audio.setVolume(el.dataset.deck, state.decks[el.dataset.deck].volume).catch(() => {}); }
       if (el.dataset.action === 'deck-pitch') { state.decks[el.dataset.deck].pitch = Number(el.value); audio.setPitch(el.dataset.deck, el.value); }
-      if (el.dataset.action === 'crossfade') { state.crossfade = Number(el.value) / 100; audio.setCrossfade(state.crossfade); }
+      if (el.dataset.action === 'crossfade') { const pair = el.dataset.crossfadePair; state.crossfades[pair] = Number(el.value) / 100; audio.setCrossfade(pair, state.crossfades[pair]); }
     }
   });
   document.addEventListener('submit', async (event) => {
+    const accountForm = event.target.closest('[data-form="account"]');
+    if (accountForm) {
+      event.preventDefault();
+      const values = Object.fromEntries(new FormData(accountForm));
+      const endpoint = accountForm.dataset.mode === 'register' ? '/api/auth/register' : '/api/auth/login';
+      const errorTarget = $('#profile-error');
+      if (errorTarget) errorTarget.textContent = '';
+      try {
+        const data = await api(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
+        state.user = data.user; state.profileMessage = '';
+        unlockWorkspace();
+        try { await loadData(); }
+        catch (error) { if (error.status === 401) return; toast(`TuneOS data could not be loaded: ${error.message}`); }
+        if (!state.user) return;
+        renderLauncher(); openApp('dj');
+        toast(accountForm.dataset.mode === 'register' ? 'TuneOS account created.' : 'You are logged in.');
+      } catch (error) {
+        state.profileMessage = error.message;
+        if (errorTarget) errorTarget.textContent = error.message;
+      }
+      return;
+    }
+    const ufwForm = event.target.closest('[data-form="ufw-rule"]');
+    if (ufwForm) {
+      event.preventDefault();
+      const values = Object.fromEntries(new FormData(ufwForm));
+      try {
+        await api('/api/firewall/actual/rules', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
+        ufwForm.reset(); await refreshFirewall(); toast('Actual Ubuntu UFW rule added.');
+      } catch (error) { toast(error.message); }
+      return;
+    }
+    const sshForm = event.target.closest('[data-form="ssh-password"]');
+    if (sshForm) {
+      event.preventDefault();
+      const enabled = new FormData(sshForm).get('enabled') === 'true';
+      const confirmKeyAccess = enabled || window.confirm('Disable SSH password login? Confirm that key-based SSH access is already working.');
+      if (!confirmKeyAccess) return;
+      try {
+        await api('/api/ssh/password-authentication', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled, confirmKeyAccess }) });
+        await refreshSsh(); toast(`SSH password authentication ${enabled ? 'enabled' : 'disabled'}.`);
+      } catch (error) { toast(error.message); }
+      return;
+    }
     const form = event.target.closest('[data-form="firewall"]'); if (!form) return;
     event.preventDefault();
     const values = Object.fromEntries(new FormData(form));
@@ -468,6 +648,7 @@
   });
   document.addEventListener('pointerup', () => { drag = null; });
   document.addEventListener('keydown', (event) => {
+    if (!state.user) { if (event.key === 'Escape') event.preventDefault(); return; }
     if (event.key === 'Escape') hideOverlays();
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && state.settings.shortcuts !== false) { event.preventDefault(); renderSearch(''); showOverlay('search'); }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'shift' && event.code === 'KeyK') { event.preventDefault(); showOverlay('launcher'); }
@@ -476,7 +657,22 @@
 
   const uploadInput = document.createElement('input'); uploadInput.id = 'audio-upload'; uploadInput.type = 'file'; uploadInput.accept = 'audio/*,.mp3,.wav,.ogg,.m4a,.aac,.flac,.webm'; uploadInput.hidden = true;
   document.body.append(uploadInput);
-  renderLauncher(); updateClock(); window.setInterval(updateClock, 15000);
-  loadData().then(() => { renderLauncher(); openApp(new URLSearchParams(location.search).get('demo') === '1' ? 'dj' : 'dj'); })
-    .catch((error) => { toast(`TuneOS API unavailable: ${error.message}`); openApp('dj'); });
+  renderLauncher(); updateProfileButton(); updateClock(); window.setInterval(updateClock, 15000);
+  (async () => {
+    let session;
+    try {
+      session = await api('/api/auth/session');
+    } catch (error) {
+      lockToLogin(`TuneOS could not verify your session. ${error.message || 'Please refresh and try again.'}`);
+      return;
+    }
+    if (!session.user) { lockToLogin(); return; }
+    state.user = session.user;
+    unlockWorkspace();
+    try { await loadData(); }
+    catch (error) { if (error.status === 401 || !state.user) return; toast(`TuneOS data could not be loaded: ${error.message}`); }
+    if (!state.user) return;
+    renderLauncher(); openApp('dj');
+    window.setInterval(() => { if (state.user) refreshProfile(); }, 30000);
+  })();
 })();
